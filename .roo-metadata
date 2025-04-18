@@ -1,0 +1,10 @@
+Github Metadata:
+ - Owner: timthesinner
+ - Repo: smart-mcp-proxy
+
+Repo Metadata:
+ - Language: Golang
+ - Containerization: Docker
+ - Configuration: Environmental / Config File
+ - CI/CD Environment: Github Actions
+ - License: MIT
