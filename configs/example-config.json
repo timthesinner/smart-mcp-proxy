@@ -1,0 +1,36 @@
+{
+  "mcp_servers": [
+    {
+      "name": "local-mcp-server",
+      "address": "127.0.0.1:50051",
+      "allowed_tools": [
+        "search_package_docs",
+        "get_completions"
+      ],
+      "allowed_resources": [
+        "repo://timthesinner/smart-mcp-proxy/refs/heads/main/contents/cmd/proxy/main.go"
+      ]
+    },
+    {
+      "name": "remote-mcp-server",
+      "address": "mcp.example.com:443",
+      "allowed_tools": [],
+      "allowed_resources": []
+    },
+    {
+      "name": "stdio-mcp-server",
+      "command": "/usr/local/bin/mcp-stdio-server",
+      "args": ["--verbose", "--config", "/etc/mcp/config.yaml"],
+      "env": {
+        "MCP_LOG_LEVEL": "debug",
+        "MCP_TIMEOUT": "30s"
+      },
+      "allowed_tools": [
+        "search_package_docs"
+      ],
+      "allowed_resources": [
+        "repo://timthesinner/smart-mcp-proxy/refs/heads/main/contents/internal/config/config.go"
+      ]
+    }
+  ]
+}
