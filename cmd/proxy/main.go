@@ -370,14 +370,6 @@ func singleJoiningSlash(a, b string) string {
 	return a + b
 }
 
-import (
-	"bufio"
-	"flag"
-	"os"
-	"os/exec"
-	"runtime"
-)
-
 func main() {
 	// Define command-line flags
 	configPathFlag := flag.String("config", "", "Path to MCP proxy config file")

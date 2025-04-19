@@ -38,6 +38,60 @@ export MCP_PROXY_CONFIG=/path/to/config.json
 
 See the example configuration file at `configs/example-config.json` for a sample setup, including examples of both HTTP-based and stdio-based MCP server configurations.
 
+## Running Modes
+
+The MCP Proxy Server supports two primary modes of operation:
+
+### HTTP Mode
+
+This is the default mode where the proxy listens on HTTP port 8080 and routes client requests to configured MCP servers. To run in HTTP mode:
+
+```bash
+./smart-mcp-proxy -config /path/to/config.json
+```
+
+or set the environment variable and run:
+
+```bash
+export MCP_PROXY_CONFIG=/path/to/config.json
+./smart-mcp-proxy
+```
+
+### Command (STDIO) Mode
+
+In command mode, the proxy communicates with the MCP client via STDIN/STDOUT instead of HTTP. This mode is useful for integration scenarios requiring direct stdio communication. To run in command mode:
+
+```bash
+./smart-mcp-proxy -config /path/to/config.json -mode command
+```
+
+or set the environment variable:
+
+```bash
+export MCP_PROXY_MODE=command
+export MCP_PROXY_CONFIG=/path/to/config.json
+./smart-mcp-proxy
+```
+
+### Docker Usage
+
+The Docker image runs the proxy in command mode by default. To run the container:
+
+```bash
+docker run -e MCP_PROXY_CONFIG=/path/to/config.json smart-mcp-proxy
+```
+
+To override the mode to HTTP mode at runtime:
+
+```bash
+docker run -e MCP_PROXY_MODE=http -e MCP_PROXY_CONFIG=/path/to/config.json smart-mcp-proxy
+```
+
+### VSCode Launch Configuration
+
+A launch configuration is provided to run the proxy in command mode for local development and debugging. Use the "Run MCP Proxy in Command Mode" configuration in VSCode's Run and Debug panel. It uses the example config file by default.
+
+
 ## Command Mode (STDIO)
 
 The proxy can also run in "command mode" where it communicates with the MCP client via STDIN/STDOUT instead of HTTP. This mode is useful for integration scenarios requiring direct stdio communication.
