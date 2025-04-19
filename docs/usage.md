@@ -56,3 +56,23 @@ The proxy manages the lifecycle of the stdio-based MCP server process, including
 ## Logs and Debugging
 
 The proxy server will log connection attempts and validation errors. Ensure your configuration file is valid JSON and follows the schema described in the configuration documentation.
+
+## Advanced Usage
+
+- Multi-server setups: Configure multiple MCP servers with different allowed tools and resources.
+- Custom tool/resource exposure: Fine-tune which tools and resources are exposed per MCP server.
+- Environment variable overrides: Use environment variables to override configuration settings for flexible deployments.
+
+## FAQ and Troubleshooting
+
+- Q: What happens if a stdio-based MCP server crashes?
+  A: The proxy will attempt to restart it automatically based on internal policies.
+
+- Q: How do I restrict access to specific tools?
+  A: Use the `allowed_tools` field in the configuration to whitelist tools per MCP server.
+
+- Q: Can I expose all tools and resources without restrictions?
+  A: Yes, omit or leave `allowed_tools` and `allowed_resources` empty to allow all.
+
+- Q: Where can I find logs?
+  A: Logs are output to the proxy server's standard output and can be redirected as needed.

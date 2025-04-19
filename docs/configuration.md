@@ -36,6 +36,12 @@ Each MCP server configuration object contains:
 - `allowed_tools` (array of strings, optional): List of tool names allowed for this MCP server. If omitted or empty, all tools are allowed.
 - `allowed_resources` (array of strings, optional): List of resource URIs allowed for this MCP server. If omitted or empty, all resources are allowed.
 
+### Required vs Optional Fields
+
+- Either `address` or `command` must be specified for each MCP server.
+- `name` is mandatory and must be unique.
+- `allowed_tools` and `allowed_resources` are optional; if omitted or empty, no restrictions apply.
+
 ## Validation Rules
 
 - At least one MCP server must be defined.
@@ -80,3 +86,10 @@ The path to the configuration file can be set using the environment variable `MC
 - The proxy server enforces allow-lists for tools and resources per MCP server.
 - If allow-lists are empty or omitted, no restrictions are applied.
 - For stdio-based MCP servers, the proxy will start the specified command with optional arguments and environment variables, managing the process lifecycle.
+
+## Troubleshooting Tips
+
+- Ensure the configuration file is valid JSON and follows the schema.
+- Verify that `command` paths are executable and arguments are correct.
+- Check logs for errors related to MCP server startup or connection issues.
+- Use the example configuration at `configs/example-config.json` as a reference.
