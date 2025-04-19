@@ -90,6 +90,7 @@ docker run -e MCP_PROXY_MODE=http -e MCP_PROXY_CONFIG=/path/to/config.json smart
 ### VSCode Launch Configuration
 
 A launch configuration is provided to run the proxy in command mode for local development and debugging. Use the "Run MCP Proxy in Command Mode" configuration in VSCode's Run and Debug panel. It uses the example config file by default.
+Additionally, a "Launch Proxy (STDIO Mode)" configuration is available for launching directly into STDIO mode.
 
 
 ## Command Mode (STDIO)
