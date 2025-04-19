@@ -29,7 +29,7 @@ func main() {
 		mode = *modeFlag // Use flag only if env var is not set
 	}
 	if mode == "" {
-		mode = "http" // Default to http if both env var and flag are empty
+		mode = "stdio" // Default to stdio if both env var and flag are empty
 	}
 
 	// Load config

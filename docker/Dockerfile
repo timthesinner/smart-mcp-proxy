@@ -61,12 +61,10 @@ WORKDIR /app
 # Switch to non-root user
 USER proxyuser
 
-# Expose port 8080
-EXPOSE 8080
-
-# Set the web server in release mode
+# Set the web server in release mode (relevant for HTTP mode)
 ENV GIN_MODE=release
 
-# Default command to run the Go binary in command mode, allow override with MCP_PROXY_MODE env var
-ENV MCP_PROXY_MODE=command
-CMD ["/usr/local/bin/smart-mcp-proxy", "-mode", "command"]
+# Default entrypoint to run the Go binary in stdio mode.
+# Allows overriding the mode via command-line arguments (e.g., --mode=http)
+# or the MCP_PROXY_MODE environment variable.
+ENTRYPOINT ["/usr/local/bin/smart-mcp-proxy", "--mode=stdio"]
