@@ -100,7 +100,13 @@ docker pull ghcr.io/timthesinner/smart-mcp-proxy:latest
 Run the Docker container with:
 
 ```bash
-docker run -p 8080:8080 ghcr.io/timthesinner/smart-mcp-proxy:latest
+docker run -p 8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ./config.json:/app/config.json:ro \
+  -e MCP_PROXY_CONFIG=/app/config.json \
+  --privileged \
+  --user "$(id -u):$(id -g)" \
+  ghcr.io/timthesinner/smart-mcp-proxy:latest
 ```
 
 This will start the Smart MCP Proxy server, listening on port 8080.
