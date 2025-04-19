@@ -18,7 +18,7 @@ COPY . .
 
 # Build the Go binary for the target platform with correct name
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=$(dpkg --print-architecture) go build -o /smart-mcp-proxy ./cmd/proxy/main.go
+    CGO_ENABLED=0 GOOS=linux GOARCH=$(dpkg --print-architecture) go build -o /smart-mcp-proxy ./cmd/proxy
 
 # Final stage
 FROM --platform=$TARGETPLATFORM debian:bookworm-slim

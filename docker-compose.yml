@@ -9,5 +9,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - MCP_PROXY_CONFIG=/app/config.json
+      - MCP_PROXY_MODE=http
     user: "${UID}:${GID}"
     privileged: true
