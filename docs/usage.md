@@ -38,8 +38,31 @@ export MCP_PROXY_CONFIG=/path/to/config.json
 
 See the example configuration file at `configs/example-config.json` for a sample setup, including examples of both HTTP-based and stdio-based MCP server configurations.
 
+## Docker-in-Docker (DinD) Support and Security Considerations
 
-## Using Docker-in-Docker (DinD) Sidecar for CI or Isolation
+The smart-mcp-proxy project supports Docker-in-Docker (DinD) usage in two primary ways: by mounting the host Docker socket directly or by using a DinD sidecar container. Each approach has distinct security implications and usage scenarios.
+
+### Mounting the Host Docker Socket
+
+You can enable DinD support by mounting the host's Docker socket (`/var/run/docker.sock`) into the `smart-mcp-proxy` container. This allows the proxy server to communicate directly with the host Docker daemon.
+
+**Security Implications:**
+
+- Mounting the Docker socket grants the container full control over the host's Docker daemon.
+- This effectively provides root-level access to the host system via Docker.
+- Use this method only in trusted environments where you control the container and host security.
+- Avoid using this approach in untrusted or multi-tenant environments.
+
+**Enabling Socket Mounting:**
+
+- In `docker-compose.yml` and `docker-compose-dev.yml`, mount the Docker socket as a volume:
+  ```yaml
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  ```
+- Optionally, run the container in privileged mode to enable additional capabilities if required.
+
+### Using the DinD Sidecar Approach
 
 For CI/CD pipelines or scenarios where mounting the host Docker socket is not possible or desirable, you can run the MCP Proxy Server alongside a Docker-in-Docker (DinD) sidecar service.
 
