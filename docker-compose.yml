@@ -6,5 +6,7 @@ services:
       - "8080:8080"
     volumes:
       - ./config.json:/app/config.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - MCP_PROXY_CONFIG=/app/config.json
+    privileged: true
