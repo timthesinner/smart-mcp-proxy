@@ -5,6 +5,7 @@ Github Metadata:
 Repo Metadata:
  - Language: Golang v1.24.2
  - Containerization: Docker
+ - Docker Repo: ghcr.io/timthesinner/smart-mcp-proxy
  - Configuration: Environmental / Config File
  - CI/CD Environment: Github Actions
  - License: MIT

@@ -1,0 +1,12 @@
+services:
+  smart-mcp-proxy-dev:
+    container_name: smart-mcp-proxy-dev
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "9090:8080"
+    volumes:
+      - ./config.json:/app/config.json:ro
+    environment:
+      - MCP_PROXY_CONFIG=/app/config.json
