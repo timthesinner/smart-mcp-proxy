@@ -1,16 +1,39 @@
-# Use latest LTS Debian base image
-FROM debian:bookworm-slim
+# syntax=docker/dockerfile:experimental
+# Multi-stage build for smart-mcp-proxy supporting amd64 and arm64
+
+# Builder stage
+FROM --platform=$BUILDPLATFORM golang:1.21-bullseye AS builder
+
+# Set working directory inside builder
+WORKDIR /src
+
+# Copy go.mod and go.sum for dependency caching
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the Go binary for the target platform with correct name
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$(dpkg --print-architecture) go build -o /smart-mcp-proxy ./cmd/proxy/main.go
+
+# Final stage
+FROM --platform=$TARGETPLATFORM debian:bookworm-slim
 
 # Set environment variables for non-interactive installs
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies: curl, gnupg, ca-certificates, python3, nodejs (LTS)
+# Install dependencies: curl, gnupg, ca-certificates, python3, python3-pip, nodejs, docker (for docker-in-docker)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
     ca-certificates \
     python3 \
     python3-pip \
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js LTS (using NodeSource)
@@ -21,20 +44,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
 # Create a non-root user to run the Go process
 RUN useradd -m -d /home/proxyuser -s /bin/bash proxyuser
 
-# Set working directory
-WORKDIR /app
-
-# Copy go.mod and go.sum first for caching
-COPY go.mod go.sum ./
-
-# Download Go modules (assuming Go is installed in build stage, but here we only prepare Dockerfile)
-# This step is placeholder for multi-stage build, actual Go build will be done in build stage
-
-# Copy the rest of the source code
-COPY . .
+# Copy the Go binary from builder stage
+COPY --from=builder /smart-mcp-proxy /usr/local/bin/smart-mcp-proxy
 
 # Change ownership to non-root user
-RUN chown -R proxyuser:proxyuser /app
+RUN chown proxyuser:proxyuser /usr/local/bin/smart-mcp-proxy
+
+# Set working directory
+WORKDIR /app
 
 # Switch to non-root user
 USER proxyuser
@@ -42,5 +59,5 @@ USER proxyuser
 # Expose port 8080
 EXPOSE 8080
 
-# Entrypoint to start the Go HTTP server process
-ENTRYPOINT ["./cmd/proxy/proxy"]
+# Default command to run the Go binary
+CMD ["/usr/local/bin/smart-mcp-proxy"]
