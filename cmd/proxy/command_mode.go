@@ -3,12 +3,16 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
+	"context" // Keep for Shutdown signature
 	"encoding/json"
 	"fmt"
+
+	// "io" // Not directly used, bytes.NewReader suffices
 	"log"
 	"net/http" // Keep for http status codes and header manipulation
 	"os"
+
+	// "smart-mcp-proxy/internal/config" // Not directly used here, types handled via ProxyServer methods
 	"strings"
 	// Note: config import removed as types are handled by ProxyServer methods
 	// Gin is no longer needed here
@@ -42,17 +46,17 @@ type jsonRPCResponse struct {
 type toolCallParams struct {
 	ServerName string          `json:"serverName"` // Added serverName
 	ToolName   string          `json:"toolName"`   // Renamed from Name
-	Arguments  json.RawMessage `json:"arguments,omitempty"`
+	Arguments  json.RawMessage `json:"arguments"`  // Arguments for the tool call (should be required)
 }
 
 // Params for resources/access (renamed from resources/call for clarity)
 type resourceAccessParams struct {
-	ServerName   string          `json:"serverName"` // Added serverName
-	ResourceName string          `json:"resourceName"`
-	ProxyPath    string          `json:"proxyPath"` // Path within the resource context
-	Method       string          `json:"method"`    // HTTP Method (GET, POST, etc.)
-	Headers      http.Header     `json:"headers,omitempty"`
-	Body         json.RawMessage `json:"body,omitempty"`
+	ServerName   string            `json:"serverName"` // Added serverName
+	ResourceName string            `json:"resourceName"`
+	ProxyPath    string            `json:"proxyPath,omitempty"` // Path within the resource context, make optional
+	Method       string            `json:"method"`              // HTTP Method (GET, POST, etc.)
+	Headers      map[string]string `json:"headers,omitempty"`   // Changed to map[string]string for easier JSON handling
+	Body         json.RawMessage   `json:"body,omitempty"`
 }
 
 // --- End Param Structs ---
@@ -85,7 +89,6 @@ func (c *CommandProxy) Run() error {
 			// Log error to stderr, but try to send a JSON-RPC error response
 			fmt.Fprintf(os.Stderr, "Error processing command request: %v\n", err)
 			// Attempt to create a generic error response if possible
-			// This part might need refinement based on where the error occurred
 			errorResp := jsonRPCResponse{
 				JSONRPC: "2.0",
 				ID:      nil, // ID might be unknown if parsing failed early
@@ -119,9 +122,10 @@ func (c *CommandProxy) Run() error {
 }
 
 // Shutdown is a placeholder for command mode; typically no explicit shutdown needed.
+// The actual MCP server shutdown is handled by the ProxyServer instance.
 func (c *CommandProxy) Shutdown(ctx context.Context) error {
-	log.Println("CommandProxy Shutdown called (no-op).")
-	// No network server to shut down, MCP server shutdown handled by main/HTTPProxy
+	log.Println("CommandProxy Shutdown called (delegating to ProxyServer).")
+	// ProxyServer shutdown logic is called from main, no specific action here.
 	return nil
 }
 
@@ -145,39 +149,27 @@ func (c *CommandProxy) handleCommandRequest(reqBytes []byte) ([]byte, error) {
 
 	switch rpcReq.Method {
 	case "tools/list":
-		// Directly call the ProxyServer method
-		result = c.ps.ListTools()
-	case "restrictedTools/list": // Added method for restricted tools
-		result = c.ps.ListRestrictedTools()
+		result = map[string]interface{}{"tools": c.ps.ListTools()}
+	case "restrictedTools/list":
+		result = map[string]interface{}{"tools": c.ps.ListRestrictedTools()}
 	case "resources/list":
-		// Directly call the ProxyServer method
-		result = c.ps.ListResources()
-	case "restrictedResources/list": // Added method for restricted resources
-		result = c.ps.ListRestrictedResources()
+		result = map[string]interface{}{"resources": c.ps.ListResources()}
+	case "restrictedResources/list":
+		result = map[string]interface{}{"resources": c.ps.ListRestrictedResources()}
 	case "tools/call":
 		rpcErr = c.handleToolCall(rpcReq.ID, rpcReq.Params, &result)
-	case "resources/access": // Renamed from resources/call
+	case "resources/access":
 		rpcErr = c.handleResourceAccess(rpcReq.ID, rpcReq.Params, &result)
 	default:
 		rpcErr = &rpcError{Code: -32601, Message: "Method not found"}
 	}
 
 	// 4. Construct JSON-RPC Response adhering to spec (result XOR error)
-	// Explicitly nil result if there was an error to ensure omitempty works correctly,
-	// as 'result' might hold stale data from previous calls within the same test.
-	if rpcErr != nil {
-	}
-
-	// Construct response conditionally to ensure Result is omitted on error
 	resp := jsonRPCResponse{
 		JSONRPC: "2.0",
 		ID:      rpcReq.ID,
-	}
-	if rpcErr != nil {
-		resp.Error = rpcErr
-		// Do not assign resp.Result
-	} else {
-		resp.Result = result // Assign result only on success
+		Result:  result,
+		Error:   rpcErr,
 	}
 
 	// 5. Marshal JSON-RPC Response
@@ -194,19 +186,20 @@ func (c *CommandProxy) handleToolCall(reqID interface{}, params json.RawMessage,
 		return &rpcError{Code: -32602, Message: "Invalid params for tools/call: serverName and toolName are required"}
 	}
 
+	// Find server first
 	server := c.ps.findMCPServerByName(toolParams.ServerName)
 	if server == nil {
 		return &rpcError{Code: -32001, Message: fmt.Sprintf("Server '%s' not found", toolParams.ServerName)}
 	}
+	// Check tool allowance *before* preparing the request
 	if !server.IsToolAllowed(toolParams.ToolName) {
 		return &rpcError{Code: -32002, Message: fmt.Sprintf("Tool '%s' not allowed on server '%s'", toolParams.ToolName, toolParams.ServerName)}
 	}
 
-	// Prepare input for ProxyRequest
+	// Prepare input for ProxyRequest using ProxyRequestInput (defined in proxy.go)
 	// Assume tool calls are POST requests to a path like /tool/{toolName}
-	// Headers might be passed in params in a real scenario, but keeping simple for now.
 	input := ProxyRequestInput{
-		Server: server,
+		Server: server,          // Pass the found server
 		Method: http.MethodPost, // Common for tool calls
 		Path:   fmt.Sprintf("/tool/%s", toolParams.ToolName),
 		Query:  "", // Query params usually not used for tool calls
@@ -215,16 +208,30 @@ func (c *CommandProxy) handleToolCall(reqID interface{}, params json.RawMessage,
 	}
 	input.Header.Set("Content-Type", "application/json") // Assume JSON arguments
 
+	// Call the core proxy logic
 	respOutput, err := c.ps.ProxyRequest(input)
 	if err != nil {
-		return &rpcError{Code: -32003, Message: "Failed to proxy tool call", Data: err.Error()}
+		// Provide more context in the error message
+		return &rpcError{Code: -32003, Message: fmt.Sprintf("Failed to proxy tool call to '%s'", toolParams.ServerName), Data: err.Error()}
 	}
 
 	// Format the result for JSON-RPC
+	// Attempt to unmarshal the body if it's JSON, otherwise return as string
+	var bodyResult interface{}
+	if len(respOutput.Body) > 0 {
+		if err := json.Unmarshal(respOutput.Body, &bodyResult); err != nil {
+			// If unmarshal fails, treat body as a plain string
+			log.Printf("Warning: Failed to unmarshal response body from tool call (%s) as JSON: %v. Returning as string.", input.Path, err)
+			bodyResult = string(respOutput.Body)
+		}
+	} else {
+		bodyResult = nil // Represent empty body as null
+	}
+
 	*result = map[string]interface{}{
 		"status":  respOutput.Status,
-		"headers": respOutput.Headers,
-		"body":    string(respOutput.Body), // Return body as string for JSON-RPC
+		"headers": respOutput.Headers, // Headers from ProxyResponseOutput are already http.Header
+		"body":    bodyResult,         // Return potentially unmarshalled body or string
 	}
 	return nil // Success
 }
@@ -235,14 +242,18 @@ func (c *CommandProxy) handleResourceAccess(reqID interface{}, params json.RawMe
 	if err := json.Unmarshal(params, &resourceParams); err != nil {
 		return &rpcError{Code: -32602, Message: "Invalid params for resources/access", Data: err.Error()}
 	}
+	// Validate required fields
 	if resourceParams.ServerName == "" || resourceParams.ResourceName == "" || resourceParams.Method == "" {
 		return &rpcError{Code: -32602, Message: "Invalid params for resources/access: serverName, resourceName, and method are required"}
 	}
 
+	// Find server first
 	server := c.ps.findMCPServerByName(resourceParams.ServerName)
 	if server == nil {
 		return &rpcError{Code: -32001, Message: fmt.Sprintf("Server '%s' not found", resourceParams.ServerName)}
 	}
+
+	// Check resource allowance *after* finding server but *before* preparing request
 	if !server.IsResourceAllowed(resourceParams.ResourceName) {
 		return &rpcError{Code: -32002, Message: fmt.Sprintf("Resource '%s' not allowed on server '%s'", resourceParams.ResourceName, resourceParams.ServerName)}
 	}
@@ -250,39 +261,58 @@ func (c *CommandProxy) handleResourceAccess(reqID interface{}, params json.RawMe
 	// Construct the target path, ensuring proxyPath starts correctly
 	targetPath := fmt.Sprintf("/resource/%s", resourceParams.ResourceName)
 	if resourceParams.ProxyPath != "" {
+		// Ensure single slash between resource name and proxy path
 		if !strings.HasPrefix(resourceParams.ProxyPath, "/") {
 			targetPath += "/"
 		}
 		targetPath += resourceParams.ProxyPath
 	}
 
-	// Prepare input for ProxyRequest
+	// Prepare input for ProxyRequest using ProxyRequestInput (defined in proxy.go)
 	input := ProxyRequestInput{
-		Server: server,
+		Server: server, // Pass the found server
 		Method: resourceParams.Method,
 		Path:   targetPath,
-		Query:  "", // Query params could be added if needed via params struct
-		Header: resourceParams.Headers,
+		Query:  "",                // Query params could be added if needed via params struct
+		Header: make(http.Header), // Initialize Header
 		Body:   bytes.NewReader(resourceParams.Body),
 	}
-	if input.Header == nil {
-		input.Header = make(http.Header) // Ensure header is not nil
+
+	// Copy headers from params (map[string]string) to http.Header
+	for k, v := range resourceParams.Headers {
+		input.Header.Set(k, v)
 	}
+
 	// Potentially set default Content-Type if body is present and header isn't set
+	// Check Content-Type specifically, don't overwrite if already set by params
 	if len(resourceParams.Body) > 0 && input.Header.Get("Content-Type") == "" {
 		input.Header.Set("Content-Type", "application/json") // Default assumption
 	}
 
+	// Call the core proxy logic
 	respOutput, err := c.ps.ProxyRequest(input)
 	if err != nil {
-		return &rpcError{Code: -32003, Message: "Failed to proxy resource access", Data: err.Error()}
+		// Provide more context in the error message
+		return &rpcError{Code: -32003, Message: fmt.Sprintf("Failed to proxy resource access to '%s'", resourceParams.ServerName), Data: err.Error()}
 	}
 
 	// Format the result for JSON-RPC
+	// Attempt to unmarshal the body if it's JSON, otherwise return as string
+	var bodyResult interface{}
+	if len(respOutput.Body) > 0 {
+		if err := json.Unmarshal(respOutput.Body, &bodyResult); err != nil {
+			// If unmarshal fails, treat body as a plain string
+			log.Printf("Warning: Failed to unmarshal response body from resource access (%s %s) as JSON: %v. Returning as string.", input.Method, input.Path, err)
+			bodyResult = string(respOutput.Body)
+		}
+	} else {
+		bodyResult = nil // Represent empty body as null
+	}
+
 	*result = map[string]interface{}{
 		"status":  respOutput.Status,
-		"headers": respOutput.Headers,
-		"body":    string(respOutput.Body), // Return body as string
+		"headers": respOutput.Headers, // Headers from ProxyResponseOutput are already http.Header
+		"body":    bodyResult,         // Return potentially unmarshalled body or string
 	}
 	return nil // Success
 }

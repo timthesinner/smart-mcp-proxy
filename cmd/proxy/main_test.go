@@ -14,7 +14,7 @@ import (
 )
 
 // testHttpServer remains the same - simulates a backend MCP server
-func testHttpServer(serverName string, allowedTools []string, allowedResources []string) (*httptest.Server, config.MCPServerConfig) {
+func testHttpServer(serverName string, allowedTools []string, allowedResources []string, restrictedTools []string, restrictedResources []string) (*httptest.Server, config.MCPServerConfig) {
 	mux := http.NewServeMux()
 
 	// Simulate /tools endpoint on backend
@@ -23,6 +23,10 @@ func testHttpServer(serverName string, allowedTools []string, allowedResources [
 		w.Header().Set("Content-Type", "application/json")
 		var tools []config.ToolInfo
 		for _, tool := range allowedTools {
+			// Add basic schema for testing
+			tools = append(tools, config.ToolInfo{Name: tool, InputSchema: map[string]interface{}{"type": "object"}})
+		}
+		for _, tool := range restrictedTools {
 			// Add basic schema for testing
 			tools = append(tools, config.ToolInfo{Name: tool, InputSchema: map[string]interface{}{"type": "object"}})
 		}
@@ -36,6 +40,9 @@ func testHttpServer(serverName string, allowedTools []string, allowedResources [
 		w.Header().Set("Content-Type", "application/json")
 		var resources []config.ResourceInfo
 		for _, r := range allowedResources {
+			resources = append(resources, config.ResourceInfo{Name: r})
+		}
+		for _, r := range restrictedResources {
 			resources = append(resources, config.ResourceInfo{Name: r})
 		}
 		bytes, _ := json.Marshal(map[string]interface{}{"resources": resources})
@@ -72,8 +79,8 @@ func testHttpServer(serverName string, allowedTools []string, allowedResources [
 // setupTestHTTPProxy sets up ProxyServer and HTTPProxy for testing.
 // Returns the HTTPProxy, the core ProxyServer, and the backend test servers.
 func setupTestHTTPProxy(t *testing.T) (*HTTPProxy, *ProxyServer, []*httptest.Server) {
-	server1, server1Conf := testHttpServer("server1", []string{"tool1", "tool2"}, []string{"res1"})
-	server2, server2Conf := testHttpServer("server2", []string{"tool3"}, []string{"res2"})
+	server1, server1Conf := testHttpServer("server1", []string{"tool1", "tool2"}, []string{"res1"}, []string{"r-tool1", "r-tool2"}, []string{"r-res1"})
+	server2, server2Conf := testHttpServer("server2", []string{"tool3"}, []string{"res2"}, []string{"r-tool3"}, []string{"r-res2"})
 
 	cfg := &config.Config{
 		MCPServers: []config.MCPServerConfig{server1Conf, server2Conf},

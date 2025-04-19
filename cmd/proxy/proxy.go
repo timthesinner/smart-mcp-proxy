@@ -95,7 +95,7 @@ func (ps *ProxyServer) findMCPServerByResource(resourceName string) *config.MCPS
 
 // ListTools collects ToolInfo from all MCP servers.
 func (ps *ProxyServer) ListTools() []config.ToolInfo {
-	var allTools []config.ToolInfo
+	allTools := []config.ToolInfo{}
 	for _, server := range ps.mcpServers {
 		tools := server.GetTools()
 		allTools = append(allTools, tools...)
@@ -105,7 +105,7 @@ func (ps *ProxyServer) ListTools() []config.ToolInfo {
 
 // ListRestrictedTools collects RestrictedToolInfo from all MCP servers.
 func (ps *ProxyServer) ListRestrictedTools() []RestrictedToolInfo {
-	var allTools []RestrictedToolInfo
+	allTools := []RestrictedToolInfo{}
 	for _, server := range ps.mcpServers {
 		tools := server.GetRestrictedTools()
 		for _, tool := range tools {
@@ -117,7 +117,7 @@ func (ps *ProxyServer) ListRestrictedTools() []RestrictedToolInfo {
 
 // ListResources collects ResourceInfo from all MCP servers.
 func (ps *ProxyServer) ListResources() []config.ResourceInfo {
-	var allResources []config.ResourceInfo
+	allResources := []config.ResourceInfo{}
 	for _, server := range ps.mcpServers {
 		resources := server.GetResources()
 		allResources = append(allResources, resources...)
@@ -127,7 +127,7 @@ func (ps *ProxyServer) ListResources() []config.ResourceInfo {
 
 // ListRestrictedResources collects RestrictedResourceInfo from all MCP servers.
 func (ps *ProxyServer) ListRestrictedResources() []RestrictedResourceInfo {
-	var allResources []RestrictedResourceInfo
+	allResources := []RestrictedResourceInfo{}
 	for _, server := range ps.mcpServers {
 		resources := server.GetRestrictedResources()
 		for _, resource := range resources {
