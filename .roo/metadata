@@ -3,7 +3,7 @@ Github Metadata:
  - Repo: smart-mcp-proxy
 
 Repo Metadata:
- - Language: Golang
+ - Language: Golang v1.24.2
  - Containerization: Docker
  - Configuration: Environmental / Config File
  - CI/CD Environment: Github Actions
