@@ -10,7 +10,6 @@ import (
 	"smart-mcp-proxy/internal/config"
 )
 
-// Helper to create a ProxyServer with test MCP servers for command mode tests
 func setupTestCommandProxyServer() (*ProxyServer, *config.Config, []*httptest.Server) {
 	server1, server1Conf := testHttpServer("server1", []string{"tool1", "tool2"}, []string{"res1"})
 	server2, server2Conf := testHttpServer("server2", []string{"tool3"}, []string{"res2"})

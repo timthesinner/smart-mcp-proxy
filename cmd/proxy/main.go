@@ -400,13 +400,24 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	var proxy Proxy
 	switch mode {
 	case "http":
-		runHTTPMode(cfg)
+		proxy, err = NewHTTPProxy(cfg)
+		if err != nil {
+			log.Fatalf("failed to create HTTP proxy: %v", err)
+		}
 	case "command":
-		runCommandMode(cfg)
+		proxy, err = NewCommandProxy(cfg)
+		if err != nil {
+			log.Fatalf("failed to create command proxy: %v", err)
+		}
 	default:
 		log.Fatalf("invalid mode: %s, must be 'http' or 'command'", mode)
+	}
+
+	if err := proxy.Run(); err != nil {
+		log.Fatalf("proxy run error: %v", err)
 	}
 }
 
