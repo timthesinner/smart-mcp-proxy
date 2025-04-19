@@ -1,0 +1,10 @@
+services:
+  smart-mcp-proxy:
+    container_name: smart-mcp-proxy
+    image: ghcr.io/timthesinner/smart-mcp-proxy:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.json:/app/config.json:ro
+    environment:
+      - MCP_PROXY_CONFIG=/app/config.json

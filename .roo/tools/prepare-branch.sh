@@ -12,6 +12,9 @@ feature_branch=$2
 
 set -e
 
+# Checkout main
+git checkout main
+
 # Reset to origin/main hard
 git reset --hard origin/main
 
