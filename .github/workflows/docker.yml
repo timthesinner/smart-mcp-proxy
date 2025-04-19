@@ -1,5 +1,9 @@
 name: Docker Multi-Arch Build and Push
 
+permissions:
+  contents: read
+  packages: write
+
 on:
   push:
     branches:
