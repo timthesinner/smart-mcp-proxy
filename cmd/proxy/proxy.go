@@ -137,6 +137,141 @@ func (ps *ProxyServer) ListRestrictedResources() []RestrictedResourceInfo {
 	return allResources
 }
 
+// CallTool handles the logic for executing a tool call on the appropriate backend MCP server.
+func (ps *ProxyServer) CallTool(toolName string, arguments map[string]interface{}) (*config.CallToolResult, error) {
+	server := ps.findMCPServerByTool(toolName)
+	if server == nil {
+		return nil, fmt.Errorf("no MCP server found that provides tool '%s'", toolName)
+	}
+
+	log.Printf("Calling tool '%s' on server '%s' (%s)", toolName, server.Config.Name, server.Config.Address)
+
+	if server.Config.Command != "" {
+		// Handle stdio-based tool call
+		return ps.callStdioTool(server, toolName, arguments)
+	}
+	// Handle HTTP-based tool call
+	return ps.callHttpTool(server, toolName, arguments)
+
+}
+
+// callStdioTool executes a tool call on a stdio-based MCP server.
+func (ps *ProxyServer) callStdioTool(server *config.MCPServer, toolName string, arguments map[string]interface{}) (*config.CallToolResult, error) {
+	// Construct the request payload expected by the stdio server for a tool call.
+	// This might vary based on the server's implementation, but a common pattern
+	// is a JSON object with method and params.
+	// Assuming a generic JSON-RPC like structure for the backend call:
+	backendRequest := map[string]interface{}{
+		// Adjust "method" if the backend expects something different (e.g., just the tool name)
+		"method": toolName, // Or perhaps a specific method like "call_tool"
+		"params": arguments,
+		// Add other necessary fields like jsonrpc version or id if required by the backend
+		// "jsonrpc": "2.0",
+		// "id": some_unique_id, // Generating a unique ID might be needed
+	}
+
+	reqBytes, err := json.Marshal(backendRequest)
+	if err != nil {
+		log.Printf("Error marshalling stdio tool call request for '%s': %v", toolName, err)
+		return nil, fmt.Errorf("failed to marshal request for stdio tool '%s': %w", toolName, err)
+	}
+
+	// Use the existing HandleStdioRequest logic
+	respBytes, err := server.HandleStdioRequest(reqBytes)
+	if err != nil {
+		log.Printf("Error executing stdio tool call '%s' on server '%s': %v", toolName, server.Config.Name, err)
+		return nil, fmt.Errorf("failed to execute stdio tool '%s': %w", toolName, err)
+	}
+
+	// Parse the response from the stdio server.
+	// Assume the response body directly contains the CallToolResult structure or can be unmarshalled into it.
+	var toolResult config.CallToolResult
+	if err := json.Unmarshal(respBytes, &toolResult); err != nil {
+		// Log the raw response for debugging if unmarshalling fails
+		log.Printf("Error unmarshalling stdio tool call response for '%s' from server '%s'. Raw response: %s. Error: %v", toolName, server.Config.Name, string(respBytes), err)
+		// Attempt to parse as a generic error structure if possible
+		var genericError map[string]interface{}
+		if json.Unmarshal(respBytes, &genericError) == nil {
+			return nil, fmt.Errorf("stdio tool '%s' execution failed: %v", toolName, genericError)
+		}
+		// If it's not even JSON, return a generic error
+		return nil, fmt.Errorf("failed to parse response from stdio tool '%s': %w", toolName, err)
+	}
+
+	log.Printf("Successfully called stdio tool '%s' on server '%s'", toolName, server.Config.Name)
+	return &toolResult, nil
+}
+
+// callHttpTool executes a tool call on an HTTP-based MCP server.
+func (ps *ProxyServer) callHttpTool(server *config.MCPServer, toolName string, arguments map[string]interface{}) (*config.CallToolResult, error) {
+	targetURL, err := url.Parse(server.Config.Address)
+	if err != nil {
+		log.Printf("Invalid MCP server address '%s' for tool '%s': %v", server.Config.Address, toolName, err)
+		return nil, fmt.Errorf("invalid MCP server address for tool '%s': %w", toolName, err)
+	}
+
+	// Construct the target path. Assuming POST /tool/{toolName}
+	targetURL.Path = singleJoiningSlash(targetURL.Path, fmt.Sprintf("/tool/%s", toolName))
+
+	// Marshal arguments into JSON body
+	bodyBytes, err := json.Marshal(arguments)
+	if err != nil {
+		log.Printf("Error marshalling arguments for HTTP tool call '%s': %v", toolName, err)
+		return nil, fmt.Errorf("failed to marshal arguments for tool '%s': %w", toolName, err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, targetURL.String(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		log.Printf("Failed to create HTTP request for tool '%s': %v", toolName, err)
+		return nil, fmt.Errorf("failed to create request for tool '%s': %w", toolName, err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json") // Expect JSON response
+
+	// Set a timeout context (TODO: Make timeout configurable)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	// Perform the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to reach MCP server '%s' for tool '%s': %v", server.Config.Name, toolName, err)
+		return nil, fmt.Errorf("failed to reach MCP server for tool '%s': %w", toolName, err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	respBodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response body from server '%s' for tool '%s': %v", server.Config.Name, toolName, err)
+		return nil, fmt.Errorf("failed to read response body for tool '%s': %w", toolName, err)
+	}
+
+	// Check for non-2xx status codes
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("HTTP tool call '%s' failed on server '%s' with status %d. Body: %s", toolName, server.Config.Name, resp.StatusCode, string(respBodyBytes))
+		// Try to parse error details from body if possible
+		var errorDetail map[string]interface{}
+		if json.Unmarshal(respBodyBytes, &errorDetail) == nil {
+			return nil, fmt.Errorf("HTTP tool '%s' failed with status %d: %v", toolName, resp.StatusCode, errorDetail)
+		}
+		return nil, fmt.Errorf("HTTP tool '%s' failed with status %d", toolName, resp.StatusCode)
+	}
+
+	// Parse the response body into CallToolResult
+	var toolResult config.CallToolResult
+	if err := json.Unmarshal(respBodyBytes, &toolResult); err != nil {
+		log.Printf("Error unmarshalling HTTP tool call response for '%s' from server '%s'. Raw response: %s. Error: %v", toolName, server.Config.Name, string(respBodyBytes), err)
+		return nil, fmt.Errorf("failed to parse response from HTTP tool '%s': %w", toolName, err)
+	}
+
+	log.Printf("Successfully called HTTP tool '%s' on server '%s'", toolName, server.Config.Name)
+	return &toolResult, nil
+}
+
 // ProxyRequestInput holds necessary info for proxying a request.
 type ProxyRequestInput struct {
 	Server *config.MCPServer

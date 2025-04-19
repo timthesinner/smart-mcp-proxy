@@ -136,10 +136,10 @@ func TestCommandHandleToolCall(t *testing.T) {
 	}
 
 	// --- Test valid call ---
-	toolParams := toolCallParams{
-		ServerName: "server1",
-		ToolName:   "tool1",
-		Arguments:  json.RawMessage(`{"arg1": "value1"}`),
+	// Use config.CallToolRequestParams now
+	toolParams := config.CallToolRequestParams{
+		Name:      "tool1", // Use Name field
+		Arguments: map[string]interface{}{"arg1": "value1"},
 	}
 	paramsBytes, _ := json.Marshal(toolParams)
 	rpcReq := jsonRPCRequest{
@@ -165,34 +165,30 @@ func TestCommandHandleToolCall(t *testing.T) {
 		// Correct Assertion: Result should NOT be nil on success
 		require.NotNil(t, rpcResp.Result, "Expected result for successful tool call")
 
-		// Check the structure of the result (map with status, headers, body)
-		resultMap, ok := rpcResp.Result.(map[string]interface{})
-		require.True(t, ok, "Result should be a map")
-		assert.Contains(t, resultMap, "status")
-		assert.Contains(t, resultMap, "headers")
-		assert.Contains(t, resultMap, "body")
-		assert.Equal(t, float64(200), resultMap["status"]) // Status should be 200 OK from mock server
-		// Body can be string or map[string]interface{} if JSON
-		bodyResult := resultMap["body"]
-		// The mock server returns a JSON string describing the call: {"status": "tool /tool/tool1 called"}
-		bodyMap := make(map[string]interface{})
-		// Check if bodyResult is already a map (expected case)
-		if bMap, ok := bodyResult.(map[string]interface{}); ok {
-			bodyMap = bMap
-		} else if bodyStr, ok := bodyResult.(string); ok {
-			// Fallback: If it's a string, try unmarshalling
-			err = json.Unmarshal([]byte(bodyStr), &bodyMap)
-			require.NoError(t, err, "Failed to unmarshal body string: %s", bodyStr)
-		} else {
-			require.FailNow(t, "Body result is neither a map nor a string", "Body type: %T, Body value: %v", bodyResult, bodyResult)
-		}
+		// Check the structure of the result (should be config.CallToolResult)
+		// Need to remarshal and unmarshal the result into the expected struct
+		resultBytes, err := json.Marshal(rpcResp.Result)
+		require.NoError(t, err, "Failed to remarshal result map")
 
-		// Now assert on the unmarshalled map based on mock server response
-		assert.Equal(t, "tool /tool/tool1 called", bodyMap["status"])
+		var callResult config.CallToolResult
+		err = json.Unmarshal(resultBytes, &callResult)
+		require.NoError(t, err, "Failed to unmarshal result into config.CallToolResult")
+
+		// Assertions on CallToolResult
+		require.Len(t, callResult.Content, 1, "Expected one content block")
+		assert.Equal(t, "text", callResult.Content[0].Type)
+		// The mock server returns JSON: {"status": "tool /tool/tool1 called"}
+		// The new CallTool logic for HTTP should parse this JSON into the result.
+		// Let's check if the text content matches the expected JSON string from the mock.
+		require.NotNil(t, callResult.Content[0].Text, "Text content should not be nil")
+		expectedBody := `{"status":"tool /tool/tool1 called"}`
+		assert.JSONEq(t, expectedBody, *callResult.Content[0].Text, "Body content mismatch") // Dereference pointer
+		// Or, if the CallTool logic is expected to parse the inner JSON:
+		// assert.Equal(t, "tool /tool/tool1 called", *callResult.Content[0].Text) // Adjust based on actual CallTool behavior
 	}
 
-	// --- Test server not found ---
-	toolParams.ServerName = "serverX"
+	// --- Test tool not found (server finding is now internal to CallTool) ---
+	toolParams.Name = "nonexistentTool" // Change to a tool that doesn't exist
 	paramsBytes, _ = json.Marshal(toolParams)
 	rpcReq.ID = "tool-call-err-1"
 	rpcReq.Params = paramsBytes
@@ -210,36 +206,49 @@ func TestCommandHandleToolCall(t *testing.T) {
 		// Correct Assertion: Result should be nil on error
 		assert.Nil(t, rpcResp.Result, "Expected nil result for server not found error")
 		// Correct Assertion: Error should NOT be nil on error
-		require.NotNil(t, rpcResp.Error, "Expected error for server not found")
-		assert.Equal(t, -32001, rpcResp.Error.Code) // Custom server error code
-		assert.Contains(t, rpcResp.Error.Message, "Server 'serverX' not found")
+		require.NotNil(t, rpcResp.Error, "Expected error for tool not found")
+		// Corrected expected error code and message for tool not found
+		assert.Equal(t, -32000, rpcResp.Error.Code) // Generic server error code used in handleToolCall
+		assert.Contains(t, rpcResp.Error.Message, "Failed to execute tool 'nonexistentTool'")
+		// Check the underlying error message stored in Data
+		require.NotNil(t, rpcResp.Error.Data, "Error data should not be nil for tool not found")
+		errorDataStr, ok := rpcResp.Error.Data.(string)
+		require.True(t, ok, "Error data should be a string")
+		assert.Contains(t, errorDataStr, "no MCP server found that provides tool 'nonexistentTool'")
 	}
 
-	// --- Test tool not allowed ---
-	toolParams.ServerName = "server1"
-	toolParams.ToolName = "tool3" // tool3 is on server2
-	paramsBytes, _ = json.Marshal(toolParams)
-	rpcReq.ID = "tool-call-err-2"
+	// --- Test invalid params (missing name) ---
+	// Use a map directly to represent invalid params missing 'name'
+	invalidParams := map[string]interface{}{
+		"arguments": map[string]interface{}{"arg1": "value1"},
+	}
+	paramsBytes, _ = json.Marshal(invalidParams)
+	rpcReq.ID = "tool-call-err-invalid"
 	rpcReq.Params = paramsBytes
 	reqBytes, _ = json.Marshal(rpcReq)
 
 	respBytes, err = cmdProxy.handleCommandRequest(reqBytes)
 	require.NoError(t, err)
-	// Unmarshal and check the "tool not allowed" error response
 	{
-		var rpcResp jsonRPCResponse // Scope rpcResp to this block
+		var rpcResp jsonRPCResponse
 		err = json.Unmarshal(respBytes, &rpcResp)
 		require.NoError(t, err)
 
-		assert.Equal(t, "tool-call-err-2", rpcResp.ID)
-		// Correct Assertion: Result should be nil on error
-		assert.Nil(t, rpcResp.Result, "Expected nil result for tool not allowed error")
-		// Correct Assertion: Error should NOT be nil on error
-		require.NotNil(t, rpcResp.Error, "Expected error for tool not allowed")
-		assert.Equal(t, -32002, rpcResp.Error.Code) // Custom tool not allowed error code
-		assert.Contains(t, rpcResp.Error.Message, "Tool 'tool3' not allowed on server 'server1'")
+		assert.Equal(t, "tool-call-err-invalid", rpcResp.ID)
+		assert.Nil(t, rpcResp.Result)
+		require.NotNil(t, rpcResp.Error)
+		assert.Equal(t, -32602, rpcResp.Error.Code) // Invalid Params code
+		assert.Contains(t, rpcResp.Error.Message, "Invalid params for tools/call: 'name' is required")
 	}
 
+	// Note: The "tool not allowed on server" test case is removed because
+	// the command mode `tools/call` no longer takes `serverName`. The routing
+	// to the correct server based on the tool name happens inside `ProxyServer.CallTool`.
+	// We tested the "tool not found" case above, which covers scenarios where no server handles the tool.
+
+	// The lines previously commented out here have been removed.
+	// The redundant test block checking for "tool not allowed on server"
+	// which started here has been removed as it's no longer applicable.
 }
 
 type testRestrictedToolsAndResourceResponse struct {
@@ -483,9 +492,9 @@ func TestCommandHandleErrors(t *testing.T) {
 		},
 		{
 			name:        "Invalid Params (tools/call missing name)",
-			reqBytes:    []byte(`{"jsonrpc": "2.0", "id": "p-err-1", "method": "tools/call", "params": {"serverName": "server1"}}`), // Missing toolName
+			reqBytes:    []byte(`{"jsonrpc": "2.0", "id": "p-err-1", "method": "tools/call", "params": {"arguments": {}}}`), // Missing name
 			expectedID:  "p-err-1",
-			expectedErr: &rpcError{Code: -32602, Message: "Invalid params for tools/call: serverName and toolName are required"},
+			expectedErr: &rpcError{Code: -32602, Message: "Invalid params for tools/call: 'name' is required"}, // Updated message
 		},
 		{
 			name:        "Invalid Params (resources/access missing name)",

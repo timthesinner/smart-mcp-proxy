@@ -1,19 +1,24 @@
 package main
 
 import (
+	"bytes" // Keep bytes
 	"encoding/json"
 	"fmt"
+	"io"  // Add io
+	"log" // Add log
 	"net/http"
 	"net/http/httptest"
+	"strings" // Add strings
 	"testing"
 
 	"smart-mcp-proxy/internal/config"
 
 	// Gin is needed for HTTPProxy tests
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require" // Add require
 )
 
-// testHttpServer remains the same - simulates a backend MCP server
+// testHttpServer updated to return CallToolResult for tool calls
 func testHttpServer(serverName string, allowedTools []string, allowedResources []string, restrictedTools []string, restrictedResources []string) (*httptest.Server, config.MCPServerConfig) {
 	mux := http.NewServeMux()
 
@@ -49,12 +54,27 @@ func testHttpServer(serverName string, allowedTools []string, allowedResources [
 		w.Write(bytes)
 	})
 
-	// Simulate a generic tool endpoint on backend
+	// Simulate a generic tool endpoint on backend (POST /tool/:toolName)
 	mux.HandleFunc("/tool/", func(w http.ResponseWriter, r *http.Request) {
-		// Basic echo response for tool calls
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Basic echo response for tool calls, returning a CallToolResult structure
+		toolName := strings.TrimPrefix(r.URL.Path, "/tool/")
+		bodyBytes, _ := io.ReadAll(r.Body) // Read arguments from body if needed for response
+		log.Printf("Mock Server: Received call to tool '%s' with body: %s", toolName, string(bodyBytes))
+
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status": "tool %s called"}`, r.URL.Path)
+		// Return a valid CallToolResult matching the expected structure
+		responseText := fmt.Sprintf(`{"status": "tool /tool/%s called"}`, toolName) // This is the inner JSON string
+		result := config.CallToolResult{
+			Content: []config.ContentBlock{
+				{Type: "text", Text: &responseText}, // Wrap the JSON string in the ContentBlock
+			},
+		}
+		json.NewEncoder(w).Encode(result) // Encode the CallToolResult struct
 	})
 
 	// Simulate a generic resource endpoint on backend
@@ -88,14 +108,14 @@ func setupTestHTTPProxy(t *testing.T) (*HTTPProxy, *ProxyServer, []*httptest.Ser
 
 	// 1. Create the core ProxyServer
 	ps, err := NewProxyServer(cfg)
-	assert.NoError(t, err)
-	assert.NotNil(t, ps)
+	require.NoError(t, err) // Use require here
+	require.NotNil(t, ps)   // Use require here
 
 	// 2. Create the HTTPProxy using the ProxyServer
 	// Use a dummy listen address for testing; it won't actually bind.
 	httpProxy, err := NewHTTPProxy(ps, ":0") // ":0" is often used for ephemeral ports in tests
-	assert.NoError(t, err)
-	assert.NotNil(t, httpProxy)
+	require.NoError(t, err)                  // Use require here
+	require.NotNil(t, httpProxy)             // Use require here
 
 	return httpProxy, ps, []*httptest.Server{server1, server2}
 }
@@ -202,43 +222,93 @@ func TestHTTPHandleResources(t *testing.T) {
 	assert.True(t, foundResources["res2"])
 }
 
-// TestHTTPHandleToolProxy tests the tool proxy endpoint via the HTTPProxy.
-func TestHTTPHandleToolProxy(t *testing.T) {
+// TestHTTPHandleToolCall tests the new POST /tool/:toolName endpoint.
+func TestHTTPHandleToolCall(t *testing.T) {
 	httpProxy, _, servers := setupTestHTTPProxy(t)
 	for _, server := range servers {
 		defer server.Close()
 	}
 
-	// Test valid tool proxy
-	req := httptest.NewRequest("GET", "/tool/server1/tool1/some/path", nil)
+	// --- Test valid tool call ---
+	args := `{"arg1": "value1"}`
+	req := httptest.NewRequest("POST", "/tool/tool1", strings.NewReader(args))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
+
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "tool /tool/tool1/some/path called") // Check backend response
 
-	// Test tool on different server
-	req = httptest.NewRequest("POST", "/tool/server2/tool3/another/path", nil) // Use POST
+	// Check response body structure (config.CallToolResult)
+	var callResult config.CallToolResult
+	err := json.Unmarshal(w.Body.Bytes(), &callResult)
+	assert.NoError(t, err, "Failed to unmarshal response into CallToolResult")
+	require.Len(t, callResult.Content, 1, "Expected one content block") // Use require
+	assert.Equal(t, "text", callResult.Content[0].Type)
+	require.NotNil(t, callResult.Content[0].Text, "Text content should not be nil") // Use require
+	// Mock server now returns CallToolResult containing JSON: {"status": "tool /tool/tool1 called"}
+	expectedInnerJSON := `{"status":"tool /tool/tool1 called"}`
+	assert.JSONEq(t, expectedInnerJSON, *callResult.Content[0].Text, "Inner JSON content mismatch")
+
+	// --- Test tool on different server (should still work via CallTool routing) ---
+	args = `{"arg2": 42}`
+	req = httptest.NewRequest("POST", "/tool/tool3", strings.NewReader(args))
+	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
+
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "tool /tool/tool3/another/path called")
+	err = json.Unmarshal(w.Body.Bytes(), &callResult)
+	assert.NoError(t, err)
+	require.Len(t, callResult.Content, 1)         // Use require
+	require.NotNil(t, callResult.Content[0].Text) // Use require
+	// Mock server returns CallToolResult containing JSON: {"status": "tool /tool/tool3 called"}
+	expectedInnerJSON = `{"status":"tool /tool/tool3 called"}`
+	assert.JSONEq(t, expectedInnerJSON, *callResult.Content[0].Text)
 
-	// Test tool not allowed on server
-	req = httptest.NewRequest("GET", "/tool/server1/tool3/path", nil) // tool3 not on server1
+	// --- Test tool not found ---
+	args = `{}`
+	req = httptest.NewRequest("POST", "/tool/nonexistentTool", strings.NewReader(args))
+	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusForbidden, w.Code)
-	assert.Contains(t, w.Body.String(), "tool 'tool3' not allowed on server 'server1'")
 
-	// Test server not found
-	req = httptest.NewRequest("GET", "/tool/serverX/tool1/path", nil)
+	assert.Equal(t, http.StatusInternalServerError, w.Code) // Or potentially 404 depending on error mapping
+	var errResp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &errResp)
+	assert.NoError(t, err)
+	assert.Contains(t, errResp["error"], "Failed to execute tool 'nonexistentTool'")
+	assert.Contains(t, errResp["details"], "no MCP server found that provides tool 'nonexistentTool'")
+
+	// --- Test invalid JSON body ---
+	args = `{"arg1": "value1"` // Malformed JSON
+	req = httptest.NewRequest("POST", "/tool/tool1", strings.NewReader(args))
+	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	assert.Contains(t, w.Body.String(), "server 'serverX' not found")
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	err = json.Unmarshal(w.Body.Bytes(), &errResp)
+	assert.NoError(t, err)
+	assert.Contains(t, errResp["error"], "Invalid request body")
+
+	// --- Test empty body (should be treated as empty args, potentially valid) ---
+	req = httptest.NewRequest("POST", "/tool/tool1", nil) // Empty body
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code) // Assuming empty args is valid for tool1 mock
+	err = json.Unmarshal(w.Body.Bytes(), &callResult)
+	assert.NoError(t, err)
+	require.Len(t, callResult.Content, 1)                      // Use require
+	require.NotNil(t, callResult.Content[0].Text)              // Use require
+	expectedInnerJSON = `{"status":"tool /tool/tool1 called"}` // Mock response is the same
+	assert.JSONEq(t, expectedInnerJSON, *callResult.Content[0].Text)
+
 }
 
 // TestHTTPHandleResourceProxy tests the resource proxy endpoint via the HTTPProxy.
+// This test remains largely unchanged as the resource proxy logic wasn't the focus.
 func TestHTTPHandleResourceProxy(t *testing.T) {
 	httpProxy, _, servers := setupTestHTTPProxy(t)
 	for _, server := range servers {
@@ -253,7 +323,7 @@ func TestHTTPHandleResourceProxy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "resource /resource/res1/data accessed")
 
 	// Test resource on different server
-	req = httptest.NewRequest("PUT", "/resource/server2/res2/config", nil) // Use PUT
+	req = httptest.NewRequest("PUT", "/resource/server2/res2/config", bytes.NewReader([]byte{})) // Use PUT, provide empty body reader
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)

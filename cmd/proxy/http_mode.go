@@ -103,9 +103,9 @@ func NewHTTPProxy(ps *ProxyServer, listenAddr string) (*HTTPProxy, error) {
 	engine.GET("/restricted-tools", h.handleRestrictedTools)
 	engine.GET("/resources", h.handleResources)
 	engine.GET("/restricted-resources", h.handleRestrictedResources)
-	// Use /*proxyPath to capture the rest of the path
-	engine.Any("/tool/:serverName/:toolName/*proxyPath", h.handleToolProxy)
-	engine.Any("/resource/:serverName/:resourceName/*proxyPath", h.handleResourceProxy)
+	// Change route for tool calls: POST /tool/:toolName
+	engine.POST("/tool/:toolName", h.handleToolCall)                                    // Renamed handler
+	engine.Any("/resource/:serverName/:resourceName/*proxyPath", h.handleResourceProxy) // Keep resource proxy as is for now
 	// --- End Route Setup ---
 
 	// --- HTTP Server Setup ---
@@ -146,34 +146,49 @@ func (h *HTTPProxy) handleRestrictedResources(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"resources": allResources})
 }
 
-// handleToolProxy proxies requests to the specified tool on a specific server
-func (h *HTTPProxy) handleToolProxy(c *gin.Context) {
-	serverName := c.Param("serverName")
+// handleToolCall handles POST requests to /tool/:toolName using the core ProxyServer.CallTool method.
+func (h *HTTPProxy) handleToolCall(c *gin.Context) {
 	toolName := c.Param("toolName")
-	proxyPath := c.Param("proxyPath") // Includes leading slash
 
-	server := h.ps.findMCPServerByName(serverName)
-	if server == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("server '%s' not found", serverName)})
+	// Bind JSON body to arguments map
+	var arguments map[string]interface{}
+	if err := c.ShouldBindJSON(&arguments); err != nil {
+		// Handle cases where body is empty or not valid JSON
+		// If the body is empty, arguments might be nil or an empty map, which could be valid.
+		// Let CallTool handle nil arguments if appropriate. If JSON is present but invalid:
+		if err.Error() == "EOF" { // Check for empty body explicitly
+			arguments = make(map[string]interface{}) // Treat empty body as empty args
+		} else {
+			log.Printf("Error binding JSON for tool '%s': %v", toolName, err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+	}
+
+	// Call the centralized CallTool method
+	callResult, err := h.ps.CallTool(toolName, arguments)
+	if err != nil {
+		// Map the error from CallTool to an appropriate HTTP status code
+		log.Printf("Error calling tool '%s' via ProxyServer: %v", toolName, err)
+		// Basic error mapping (can be refined)
+		statusCode := http.StatusInternalServerError // Default to 500
+		errMsg := fmt.Sprintf("Failed to execute tool '%s'", toolName)
+		// Example: Check for specific error types if CallTool provides them
+		// if errors.Is(err, someNotFoundError) {
+		// 	statusCode = http.StatusNotFound
+		// 	errMsg = err.Error()
+		// } else if errors.Is(err, someForbiddenError) {
+		//  statusCode = http.StatusForbidden
+		//  errMsg = err.Error()
+		// }
+
+		// For now, return 500 with the error message
+		c.JSON(statusCode, gin.H{"error": errMsg, "details": err.Error()})
 		return
 	}
 
-	// Check if the specific server allows this tool (optional, depends on desired behavior)
-	// If the server was found by name, we might assume access is granted,
-	// or we could double-check with IsToolAllowed. Let's double-check for safety.
-	if !server.IsToolAllowed(toolName) {
-		c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("tool '%s' not allowed on server '%s'", toolName, serverName)})
-		return
-	}
-
-	// Construct the path for the target server request
-	// The path should likely include the tool name as part of the MCP server's expected API
-	// Example: /tool/actual-tool-name/proxied/path
-	// Adjust this based on how MCP servers expect tool proxy paths.
-	// Assuming the target path should be constructed like this:
-	targetPath := fmt.Sprintf("/tool/%s%s", toolName, proxyPath) // Ensure proxyPath starts with /
-
-	h.proxyRequest(c, server, targetPath)
+	// Success: Return the CallToolResult
+	c.JSON(http.StatusOK, callResult)
 }
 
 // handleResourceProxy proxies requests to the specified resource on a specific server

@@ -11,10 +11,9 @@ import (
 	"log"
 	"net/http" // Keep for http status codes and header manipulation
 	"os"
-
-	// "smart-mcp-proxy/internal/config" // Not directly used here, types handled via ProxyServer methods
 	"strings"
-	// Note: config import removed as types are handled by ProxyServer methods
+
+	"smart-mcp-proxy/internal/config" // Needed for CallToolRequestParams and CallToolResult
 	// Gin is no longer needed here
 )
 
@@ -42,14 +41,8 @@ type jsonRPCResponse struct {
 
 // --- Structs for specific RPC method parameters ---
 
-// Params for tools/call
-type toolCallParams struct {
-	ServerName string          `json:"serverName"` // Added serverName
-	ToolName   string          `json:"toolName"`   // Renamed from Name
-	Arguments  json.RawMessage `json:"arguments"`  // Arguments for the tool call (should be required)
-}
-
 // Params for resources/access (renamed from resources/call for clarity)
+// Note: toolCallParams is removed, using config.CallToolRequestParams directly now.
 type resourceAccessParams struct {
 	ServerName   string            `json:"serverName"` // Added serverName
 	ResourceName string            `json:"resourceName"`
@@ -176,63 +169,30 @@ func (c *CommandProxy) handleCommandRequest(reqBytes []byte) ([]byte, error) {
 	return json.Marshal(resp) // Let the caller handle potential marshal error
 }
 
-// handleToolCall handles the logic for the "tools/call" RPC method.
+// handleToolCall handles the logic for the "tools/call" RPC method using the core ProxyServer.CallTool.
 func (c *CommandProxy) handleToolCall(reqID interface{}, params json.RawMessage, result *interface{}) *rpcError {
-	var toolParams toolCallParams
+	var toolParams config.CallToolRequestParams
 	if err := json.Unmarshal(params, &toolParams); err != nil {
-		return &rpcError{Code: -32602, Message: "Invalid params for tools/call", Data: err.Error()}
-	}
-	if toolParams.ServerName == "" || toolParams.ToolName == "" {
-		return &rpcError{Code: -32602, Message: "Invalid params for tools/call: serverName and toolName are required"}
+		return &rpcError{Code: -32602, Message: "Invalid params for tools/call: failed to parse", Data: err.Error()}
 	}
 
-	// Find server first
-	server := c.ps.findMCPServerByName(toolParams.ServerName)
-	if server == nil {
-		return &rpcError{Code: -32001, Message: fmt.Sprintf("Server '%s' not found", toolParams.ServerName)}
-	}
-	// Check tool allowance *before* preparing the request
-	if !server.IsToolAllowed(toolParams.ToolName) {
-		return &rpcError{Code: -32002, Message: fmt.Sprintf("Tool '%s' not allowed on server '%s'", toolParams.ToolName, toolParams.ServerName)}
+	// Validate required fields (Name and Arguments)
+	if toolParams.Name == "" {
+		// Note: Arguments can technically be nil/empty map, so only check Name.
+		return &rpcError{Code: -32602, Message: "Invalid params for tools/call: 'name' is required"}
 	}
 
-	// Prepare input for ProxyRequest using ProxyRequestInput (defined in proxy.go)
-	// Assume tool calls are POST requests to a path like /tool/{toolName}
-	input := ProxyRequestInput{
-		Server: server,          // Pass the found server
-		Method: http.MethodPost, // Common for tool calls
-		Path:   fmt.Sprintf("/tool/%s", toolParams.ToolName),
-		Query:  "", // Query params usually not used for tool calls
-		Header: make(http.Header),
-		Body:   bytes.NewReader(toolParams.Arguments), // Pass arguments as body
-	}
-	input.Header.Set("Content-Type", "application/json") // Assume JSON arguments
-
-	// Call the core proxy logic
-	respOutput, err := c.ps.ProxyRequest(input)
+	// Call the centralized CallTool method
+	callResult, err := c.ps.CallTool(toolParams.Name, toolParams.Arguments)
 	if err != nil {
-		// Provide more context in the error message
-		return &rpcError{Code: -32003, Message: fmt.Sprintf("Failed to proxy tool call to '%s'", toolParams.ServerName), Data: err.Error()}
+		// Map the error from CallTool to a JSON-RPC error
+		// You might want more specific error codes based on the error type from CallTool
+		log.Printf("Error calling tool '%s' via ProxyServer: %v", toolParams.Name, err)
+		return &rpcError{Code: -32000, Message: fmt.Sprintf("Failed to execute tool '%s'", toolParams.Name), Data: err.Error()}
 	}
 
-	// Format the result for JSON-RPC
-	// Attempt to unmarshal the body if it's JSON, otherwise return as string
-	var bodyResult interface{}
-	if len(respOutput.Body) > 0 {
-		if err := json.Unmarshal(respOutput.Body, &bodyResult); err != nil {
-			// If unmarshal fails, treat body as a plain string
-			log.Printf("Warning: Failed to unmarshal response body from tool call (%s) as JSON: %v. Returning as string.", input.Path, err)
-			bodyResult = string(respOutput.Body)
-		}
-	} else {
-		bodyResult = nil // Represent empty body as null
-	}
-
-	*result = map[string]interface{}{
-		"status":  respOutput.Status,
-		"headers": respOutput.Headers, // Headers from ProxyResponseOutput are already http.Header
-		"body":    bodyResult,         // Return potentially unmarshalled body or string
-	}
+	// Assign the successful CallToolResult directly to the JSON-RPC result field
+	*result = callResult
 	return nil // Success
 }
 
