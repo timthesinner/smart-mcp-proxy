@@ -22,6 +22,7 @@ Smart MCP Proxy acts as a secure gateway between clients and multiple MCP server
 - **Centralized Token Management:** Manage authentication tokens in one place, reducing complexity and improving security.
 - **Unified MCP Server Configuration:** Configure multiple MCP servers in a single proxy configuration file.
 - **Fine-Grained Exposure:** Selectively expose only approved tools and resources from each MCP server.
+- **Cost Savings Through Smaller Tool Footprint:** By exposing only the necessary tools and resources, Smart MCP Proxy reduces token overhead and operational costs, enabling organizations to optimize resource usage and minimize expenses.
 - **Transparent Logging:** Detailed logs of all requests and responses for auditing and troubleshooting.
 
 ## Features
