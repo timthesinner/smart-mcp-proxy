@@ -3,7 +3,7 @@
 # Usage: ./prepare-branch.sh "initial commit message" feature/branch
 
 if [ "$#" -ne 2 ]; then
-  echo "Usage: $0 "initial commit message" feature/branch"
+  echo "Usage: $0 '"initial commit message"' feature/branch"
   exit 1
 fi
 
