@@ -56,12 +56,22 @@ func testHttpServer(serverName string, allowedTools []string, allowedResources [
 
 	// Simulate a generic tool endpoint on backend (POST /tool/:toolName)
 	mux.HandleFunc("/tool/", func(w http.ResponseWriter, r *http.Request) {
+		toolName := strings.TrimPrefix(r.URL.Path, "/tool/")
+
+		// --- Error Simulation ---
+		if toolName == "tool-error-500" {
+			log.Printf("Mock Server: Simulating 500 error for tool '%s'", toolName)
+			http.Error(w, "Internal Server Error Simulation", http.StatusInternalServerError)
+			return
+		}
+		// --- End Error Simulation ---
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
+
 		// Basic echo response for tool calls, returning a CallToolResult structure
-		toolName := strings.TrimPrefix(r.URL.Path, "/tool/")
 		bodyBytes, _ := io.ReadAll(r.Body) // Read arguments from body if needed for response
 		log.Printf("Mock Server: Received call to tool '%s' with body: %s", toolName, string(bodyBytes))
 
@@ -79,9 +89,23 @@ func testHttpServer(serverName string, allowedTools []string, allowedResources [
 
 	// Simulate a generic resource endpoint on backend
 	mux.HandleFunc("/resource/", func(w http.ResponseWriter, r *http.Request) {
+		// --- Error Simulation ---
+		if strings.Contains(r.URL.Path, "error-404") {
+			log.Printf("Mock Server: Simulating 404 error for resource path '%s'", r.URL.Path)
+			http.Error(w, "Resource Not Found Simulation", http.StatusNotFound)
+			return
+		}
+		if strings.Contains(r.URL.Path, "error-500") {
+			log.Printf("Mock Server: Simulating 500 error for resource path '%s'", r.URL.Path)
+			http.Error(w, "Internal Server Error Simulation", http.StatusInternalServerError)
+			return
+		}
+		// --- End Error Simulation ---
+
 		// Basic echo response for resource access
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
+		// Revert: Do not include method in response to keep command_mode_test passing
 		fmt.Fprintf(w, `{"status": "resource %s accessed"}`, r.URL.Path)
 	})
 
@@ -99,7 +123,8 @@ func testHttpServer(serverName string, allowedTools []string, allowedResources [
 // setupTestHTTPProxy sets up ProxyServer and HTTPProxy for testing.
 // Returns the HTTPProxy, the core ProxyServer, and the backend test servers.
 func setupTestHTTPProxy(t *testing.T) (*HTTPProxy, *ProxyServer, []*httptest.Server) {
-	server1, server1Conf := testHttpServer("server1", []string{"tool1", "tool2"}, []string{"res1"}, []string{"r-tool1", "r-tool2"}, []string{"r-res1"})
+	// Add "tool-error-500" to server1's allowed tools for testing backend errors
+	server1, server1Conf := testHttpServer("server1", []string{"tool1", "tool2", "tool-error-500"}, []string{"res1"}, []string{"r-tool1", "r-tool2"}, []string{"r-res1"})
 	server2, server2Conf := testHttpServer("server2", []string{"tool3"}, []string{"res2"}, []string{"r-tool3"}, []string{"r-res2"})
 
 	cfg := &config.Config{
@@ -176,8 +201,8 @@ func TestHTTPHandleTools(t *testing.T) {
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NoError(t, err)
-	// Should get tools from both servers
-	assert.Len(t, resp.Tools, 3) // tool1, tool2, tool3
+	// Should get tools from both servers (tool1, tool2, tool-error-500, tool3)
+	assert.Len(t, resp.Tools, 4)
 
 	// Check that returned tools have expected fields
 	foundTools := make(map[string]bool)
@@ -220,6 +245,73 @@ func TestHTTPHandleResources(t *testing.T) {
 	}
 	assert.True(t, foundResources["res1"])
 	assert.True(t, foundResources["res2"])
+
+}
+
+// TestHTTPHandleRestrictedTools tests the GET /restricted-tools endpoint.
+func TestHTTPHandleRestrictedTools(t *testing.T) {
+	httpProxy, _, servers := setupTestHTTPProxy(t)
+	for _, server := range servers {
+		defer server.Close()
+	}
+
+	req := httptest.NewRequest("GET", "/restricted-tools", nil)
+	w := httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Tools []RestrictedToolInfo `json:"tools"` // Use the restricted type
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	// Should get restricted tools from both servers
+	assert.Len(t, resp.Tools, 3) // r-tool1, r-tool2, r-tool3
+
+	// Check that returned tools have expected fields including ServerName
+	foundTools := make(map[string]string) // Map tool name to server name
+	for _, tool := range resp.Tools {
+		assert.NotEmpty(t, tool.Name)
+		assert.NotEmpty(t, tool.ServerName)
+		assert.NotNil(t, tool.InputSchema)
+		foundTools[tool.Name] = tool.ServerName
+	}
+	assert.Equal(t, "server1", foundTools["r-tool1"])
+	assert.Equal(t, "server1", foundTools["r-tool2"])
+	assert.Equal(t, "server2", foundTools["r-tool3"])
+}
+
+// TestHTTPHandleRestrictedResources tests the GET /restricted-resources endpoint.
+func TestHTTPHandleRestrictedResources(t *testing.T) {
+	httpProxy, _, servers := setupTestHTTPProxy(t)
+	for _, server := range servers {
+		defer server.Close()
+	}
+
+	req := httptest.NewRequest("GET", "/restricted-resources", nil)
+	w := httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Resources []RestrictedResourceInfo `json:"resources"` // Use the restricted type
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	// Should get restricted resources from both servers
+	assert.Len(t, resp.Resources, 2) // r-res1, r-res2
+
+	// Check that returned resources have expected fields including ServerName
+	foundResources := make(map[string]string) // Map resource name to server name
+	for _, res := range resp.Resources {
+		assert.NotEmpty(t, res.Name)
+		assert.NotEmpty(t, res.ServerName)
+		foundResources[res.Name] = res.ServerName
+	}
+	assert.Equal(t, "server1", foundResources["r-res1"])
+	assert.Equal(t, "server2", foundResources["r-res2"])
 }
 
 // TestHTTPHandleToolCall tests the new POST /tool/:toolName endpoint.
@@ -308,41 +400,101 @@ func TestHTTPHandleToolCall(t *testing.T) {
 	expectedInnerJSON = `{"status":"tool /tool/tool1 called"}` // Mock response is the same
 	assert.JSONEq(t, expectedInnerJSON, *callResult.Content[0].Text)
 
+	// --- Test backend server error (500) ---
+	args = `{}`
+	req = httptest.NewRequest("POST", "/tool/tool-error-500", strings.NewReader(args)) // Use the error-simulating tool name
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadGateway, w.Code) // Expect 502 Bad Gateway from proxy
+	err = json.Unmarshal(w.Body.Bytes(), &errResp)
+	assert.NoError(t, err)
+	// Check the specific error message returned by handleToolCall for backend communication errors
+	expectedErrMsg = "Error communicating with backend server for tool 'tool-error-500'" // Use =
+	assert.Equal(t, expectedErrMsg, errResp["error"])
+	_, detailsExist = errResp["details"] // Use =
+	assert.False(t, detailsExist, "Details should not be present for this error type")
+
+	// --- Test incorrect HTTP method ---
+	req = httptest.NewRequest("GET", "/tool/tool1", nil) // Use GET instead of POST
+	w = httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+
+	// Gin's default behavior for unhandled methods on a matched route prefix is 404
+	// If we wanted 405, the handler itself would need more specific method checks.
+	// For now, asserting 404 is consistent with Gin's behavior.
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	// Optionally check the body for Gin's standard 404 page or JSON error
+	// assert.Contains(t, w.Body.String(), "404 page not found")
 }
 
 // TestHTTPHandleResourceProxy tests the resource proxy endpoint via the HTTPProxy.
-// This test remains largely unchanged as the resource proxy logic wasn't the focus.
 func TestHTTPHandleResourceProxy(t *testing.T) {
 	httpProxy, _, servers := setupTestHTTPProxy(t)
 	for _, server := range servers {
 		defer server.Close()
 	}
 
-	// Test valid resource proxy
+	// --- Test valid GET resource proxy ---
 	req := httptest.NewRequest("GET", "/resource/server1/res1/data", nil)
 	w := httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "resource /resource/res1/data accessed")
+	assert.Contains(t, w.Body.String(), "resource /resource/res1/data accessed") // Reverted: Do not check method
 
-	// Test resource on different server
-	req = httptest.NewRequest("PUT", "/resource/server2/res2/config", bytes.NewReader([]byte{})) // Use PUT, provide empty body reader
+	// --- Test valid PUT resource proxy ---
+	req = httptest.NewRequest("PUT", "/resource/server2/res2/config", bytes.NewReader([]byte(`{"key":"value"}`))) // Use PUT, provide body
+	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "resource /resource/res2/config accessed")
+	assert.Contains(t, w.Body.String(), "resource /resource/res2/config accessed") // Reverted: Do not check method
 
-	// Test resource not allowed on server
+	// --- Test valid POST resource proxy ---
+	req = httptest.NewRequest("POST", "/resource/server1/res1/action", bytes.NewReader([]byte(`{"action":"start"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "resource /resource/res1/action accessed") // Reverted: Do not check method
+
+	// --- Test valid DELETE resource proxy ---
+	req = httptest.NewRequest("DELETE", "/resource/server2/res2/item/123", nil)
+	w = httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "resource /resource/res2/item/123 accessed") // Reverted: Do not check method
+
+	// --- Test resource not allowed on server ---
 	req = httptest.NewRequest("GET", "/resource/server1/res2/value", nil) // res2 not on server1
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "resource 'res2' not allowed on server 'server1'")
 
-	// Test server not found
+	// --- Test server not found ---
 	req = httptest.NewRequest("GET", "/resource/serverX/res1/info", nil)
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "server 'serverX' not found")
+
+	// --- Test backend 404 error ---
+	req = httptest.NewRequest("GET", "/resource/server1/res1/error-404", nil) // Use error-simulating path
+	w = httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code) // Proxy should forward the 404
+	assert.Contains(t, w.Body.String(), "Resource Not Found Simulation")
+
+	// --- Test backend 500 error ---
+	req = httptest.NewRequest("GET", "/resource/server2/res2/error-500", nil) // Use error-simulating path
+	w = httptest.NewRecorder()
+	httpProxy.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadGateway, w.Code) // Proxy should return 502
+	// Check for the generic error message returned by the proxy handler
+	var errResp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &errResp)
+	assert.NoError(t, err)
+	assert.Equal(t, "backend server 'server2' returned an error", errResp["error"])
 }

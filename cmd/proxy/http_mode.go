@@ -250,6 +250,14 @@ func (h *HTTPProxy) proxyRequest(c *gin.Context, server *config.MCPServer, targe
 		return
 	}
 
+	// Check if the backend itself returned an error status (5xx)
+	if respOutput.Status >= 500 {
+		log.Printf("Backend server %s returned error status %d for %s %s", server.Config.Name, respOutput.Status, input.Method, input.Path)
+		// Optionally copy non-sensitive headers even on backend error? For now, just return 502.
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("backend server '%s' returned an error", server.Config.Name)})
+		return // Stop processing here
+	}
+
 	// Copy headers from backend response to client response
 	copyHeaders(respOutput.Headers, c.Writer.Header())
 
