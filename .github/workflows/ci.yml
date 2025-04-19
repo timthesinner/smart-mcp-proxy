@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
 
 jobs:
   fmt-and-test:
+    name: Unit Tests
     runs-on: ubuntu-latest
 
     steps:
