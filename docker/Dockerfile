@@ -45,8 +45,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+
 # Create a non-root user to run the Go process
-RUN useradd -m -d /home/proxyuser -s /bin/bash proxyuser
+RUN groupadd -f docker && useradd -m -d /home/proxyuser -s /bin/bash proxyuser && usermod -aG docker proxyuser
 
 # Copy the Go binary from builder stage
 COPY --from=builder /smart-mcp-proxy /usr/local/bin/smart-mcp-proxy
@@ -62,6 +63,9 @@ USER proxyuser
 
 # Expose port 8080
 EXPOSE 8080
+
+# Set the web server in release mode
+ENV GIN_MODE=release
 
 # Default command to run the Go binary
 CMD ["/usr/local/bin/smart-mcp-proxy"]

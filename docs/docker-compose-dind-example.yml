@@ -1,21 +1,20 @@
-version: "3.8"
-
 services:
   dind:
     image: docker:dind
     privileged: true
+    user: "${UID}:${GID}"
     environment:
       - DOCKER_TLS_CERTDIR=""
     volumes:
       - dind-storage:/var/lib/docker
 
   smart-mcp-proxy:
-    container_name: smart-mcp-proxy
+    container_name: smart-mcp-proxy-dind
     image: ghcr.io/timthesinner/smart-mcp-proxy:latest
     ports:
       - "8080:8080"
     volumes:
-      - ./config.json:/app/config.json:ro
+      - ../config.json:/app/config.json:ro
     environment:
       - MCP_PROXY_CONFIG=/app/config.json
       - DOCKER_HOST=tcp://dind:2375

@@ -9,4 +9,5 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - MCP_PROXY_CONFIG=/app/config.json
+    user: "${UID}:${GID}"
     privileged: true

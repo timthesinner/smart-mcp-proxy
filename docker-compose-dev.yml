@@ -10,5 +10,7 @@ services:
       - ./config.json:/app/config.json:ro
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      - GIN_MODE=debug
       - MCP_PROXY_CONFIG=/app/config.json
+    user: "${UID}:${GID}"
     privileged: true
