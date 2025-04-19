@@ -67,5 +67,6 @@ EXPOSE 8080
 # Set the web server in release mode
 ENV GIN_MODE=release
 
-# Default command to run the Go binary
-CMD ["/usr/local/bin/smart-mcp-proxy"]
+# Default command to run the Go binary in command mode, allow override with MCP_PROXY_MODE env var
+ENV MCP_PROXY_MODE=command
+CMD ["/usr/local/bin/smart-mcp-proxy", "-mode", "command"]

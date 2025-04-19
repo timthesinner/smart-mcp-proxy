@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -368,17 +370,55 @@ func singleJoiningSlash(a, b string) string {
 	return a + b
 }
 
+import (
+	"bufio"
+	"flag"
+	"os"
+	"os/exec"
+	"runtime"
+)
+
 func main() {
-	configPath := os.Getenv("MCP_PROXY_CONFIG")
+	// Define command-line flags
+	configPathFlag := flag.String("config", "", "Path to MCP proxy config file")
+	modeFlag := flag.String("mode", "", "Run mode: 'http' or 'command' (default 'http')")
+	flag.Parse()
+
+	// Determine config path from flag or environment variable
+	configPath := *configPathFlag
 	if configPath == "" {
-		log.Fatal("MCP_PROXY_CONFIG environment variable is not set")
+		configPath = os.Getenv("MCP_PROXY_CONFIG")
+	}
+	if configPath == "" {
+		log.Fatal("MCP_PROXY_CONFIG environment variable or -config flag must be set")
 	}
 
+	// Determine mode from flag or environment variable
+	mode := *modeFlag
+	if mode == "" {
+		mode = os.Getenv("MCP_PROXY_MODE")
+	}
+	if mode == "" {
+		mode = "http"
+	}
+
+	// Load config
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	switch mode {
+	case "http":
+		runHTTPMode(cfg)
+	case "command":
+		runCommandMode(cfg)
+	default:
+		log.Fatalf("invalid mode: %s, must be 'http' or 'command'", mode)
+	}
+}
+
+func runHTTPMode(cfg *config.Config) {
 	ps, err := NewProxyServer(cfg)
 	if err != nil {
 		log.Fatalf("failed to create proxy server: %v", err)
@@ -409,4 +449,106 @@ func main() {
 	ps.Shutdown()
 
 	log.Println("MCP Proxy Server has been shut down gracefully")
+}
+
+func runCommandMode(cfg *config.Config) {
+	// In command mode, the proxy communicates with MCP client via STDIN/STDOUT
+	// All logging goes to STDERR
+
+	ps, err := NewProxyServer(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create proxy server: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Use a scanner to read lines from stdin
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Process the MCP request line and write response to stdout
+		respBytes, err := handleCommandRequest(ps, line)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error handling command request: %v\n", err)
+			continue
+		}
+		os.Stdout.Write(respBytes)
+		os.Stdout.Write([]byte("\n"))
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
+	}
+}
+
+// handleCommandRequest processes a single MCP request in command mode
+func handleCommandRequest(ps *ProxyServer, reqBytes []byte) ([]byte, error) {
+	// For simplicity, assume the request is a JSON object with method, path, headers, body
+	// We will simulate an HTTP request and get the response
+
+	// Create a dummy HTTP request from reqBytes
+	var mcpRequest struct {
+		Method  string              `json:"method"`
+		Path    string              `json:"path"`
+		Query   string              `json:"query"`
+		Headers map[string][]string `json:"headers"`
+		Body    string              `json:"body"`
+	}
+	err := json.Unmarshal(reqBytes, &mcpRequest)
+	if err != nil {
+		return nil, fmt.Errorf("invalid request JSON: %w", err)
+	}
+
+	// Build HTTP request
+	urlStr := mcpRequest.Path
+	if mcpRequest.Query != "" {
+		urlStr += "?" + mcpRequest.Query
+	}
+	req, err := http.NewRequest(mcpRequest.Method, urlStr, strings.NewReader(mcpRequest.Body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	for k, vv := range mcpRequest.Headers {
+		for _, v := range vv {
+			req.Header.Add(k, v)
+		}
+	}
+
+	// Create a ResponseRecorder to capture the response
+	recorder := &responseRecorder{
+		header: http.Header{},
+		body:   &bytes.Buffer{},
+	}
+
+	// Serve the request using the Gin engine
+	ps.engine.ServeHTTP(recorder, req)
+
+	// Build MCP response JSON
+	mcpResponse := map[string]interface{}{
+		"status":  recorder.status,
+		"headers": recorder.header,
+		"body":    recorder.body.String(),
+	}
+	respBytes, err := json.Marshal(mcpResponse)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal response: %w", err)
+	}
+	return respBytes, nil
+}
+
+// responseRecorder is an implementation of http.ResponseWriter to capture response
+type responseRecorder struct {
+	header http.Header
+	body   *bytes.Buffer
+	status int
+}
+
+func (r *responseRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
+
+func (r *responseRecorder) WriteHeader(statusCode int) {
+	r.status = statusCode
 }
