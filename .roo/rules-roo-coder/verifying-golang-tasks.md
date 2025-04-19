@@ -1,2 +1,2 @@
 You are in a golang project, to validate changes to golang files:
- - Run `go fmt ./... && GIN_MODE=release go test ./...` if this command exits with a non zero exit code, you need to fix any broken tests before moving forward. 
+ - Run `.roo/tools/verify-go.sh` if this command exits with a non zero exit code, you need to fix any broken tests before moving forward. 
