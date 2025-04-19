@@ -105,6 +105,7 @@ docker run -p 8080:8080 \
   -v ./config.json:/app/config.json:ro \
   -e MCP_PROXY_CONFIG=/app/config.json \
   --privileged \
+  --user "$(id -u):$(id -g)" \
   ghcr.io/timthesinner/smart-mcp-proxy:latest
 ```
 
