@@ -18,7 +18,7 @@ COPY . .
 
 # Build the Go binary for the target platform with correct name
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=$(dpkg --print-architecture) go build -o /smart-mcp-proxy ./cmd/proxy/main.go
+    CGO_ENABLED=0 GOOS=linux GOARCH=$(dpkg --print-architecture) go build -o /smart-mcp-proxy ./cmd/proxy
 
 # Final stage
 FROM --platform=$TARGETPLATFORM debian:bookworm-slim
@@ -61,11 +61,10 @@ WORKDIR /app
 # Switch to non-root user
 USER proxyuser
 
-# Expose port 8080
-EXPOSE 8080
-
-# Set the web server in release mode
+# Set the web server in release mode (relevant for HTTP mode)
 ENV GIN_MODE=release
 
-# Default command to run the Go binary
-CMD ["/usr/local/bin/smart-mcp-proxy"]
+# Default entrypoint to run the Go binary in stdio mode.
+# Allows overriding the mode via command-line arguments (e.g., --mode=http)
+# or the MCP_PROXY_MODE environment variable.
+ENTRYPOINT ["/usr/local/bin/smart-mcp-proxy", "--mode=stdio"]

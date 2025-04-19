@@ -77,6 +77,26 @@ Example configuration showing both HTTP and stdio-based MCP servers:
 }
 ```
 
+
+## Runtime Configuration (Command-Line Flags and Environment Variables)
+
+In addition to the JSON configuration file, the proxy's behavior can be controlled via command-line flags and environment variables:
+
+- **Configuration File Path:**
+  - Flag: `-config /path/to/config.json`
+  - Environment Variable: `MCP_PROXY_CONFIG=/path/to/config.json`
+  - *Specifies the location of the main JSON configuration file. Required.*
+
+- **Operating Mode:**
+  - Flag: `-mode <http|command>`
+  - Environment Variable: `MCP_PROXY_MODE=<http|command>`
+  - *Selects the operating mode (HTTP or Command/STDIO). Defaults to `http` if not specified. The command-line flag takes precedence over the environment variable.*
+
+- **HTTP Port (HTTP Mode Only):**
+  - Flag: `-port <port_number>`
+  - Environment Variable: `MCP_PROXY_PORT=<port_number>`
+  - *Sets the port for the HTTP server. Defaults to `8080`.*
+
 ## Environment Variable
 
 The path to the configuration file can be set using the environment variable `MCP_PROXY_CONFIG`.

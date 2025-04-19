@@ -38,6 +38,92 @@ export MCP_PROXY_CONFIG=/path/to/config.json
 
 See the example configuration file at `configs/example-config.json` for a sample setup, including examples of both HTTP-based and stdio-based MCP server configurations.
 
+## Operating Modes
+
+The MCP Proxy Server supports two primary modes of operation:
+
+1.  **HTTP Mode (Default):**
+    - The proxy listens on an HTTP port (default 8080).
+    - Communicates with clients using the standard MCP HTTP protocol.
+    - Suitable for typical client-server interactions over the network.
+
+2.  **Command/STDIO Mode:**
+    - The proxy communicates with a single client via standard input (STDIN) and standard output (STDOUT).
+    - Uses the MCP command protocol.
+    - Logs are written to standard error (STDERR).
+    - Useful for direct integration with tools, scripts, or environments where HTTP is not desired (e.g., certain IDE extensions).
+
+### Selecting the Mode
+
+You can select the operating mode using either a command-line flag or an environment variable:
+
+- **Command-Line Flag:** Use the `-mode` flag followed by `http` or `command`.
+  ```bash
+  # Run in Command/STDIO mode
+  ./smart-mcp-proxy -config /path/to/config.json -mode command
+
+  # Explicitly run in HTTP mode (though it's the default)
+  ./smart-mcp-proxy -config /path/to/config.json -mode http
+  ```
+
+- **Environment Variable:** Set the `MCP_PROXY_MODE` environment variable to `http` or `command`.
+  ```bash
+  # Run in Command/STDIO mode
+  export MCP_PROXY_MODE=command
+  export MCP_PROXY_CONFIG=/path/to/config.json
+  ./smart-mcp-proxy
+
+  # Explicitly run in HTTP mode
+  export MCP_PROXY_MODE=http
+  export MCP_PROXY_CONFIG=/path/to/config.json
+  ./smart-mcp-proxy
+  ```
+
+If neither the flag nor the environment variable is set, the proxy defaults to **HTTP mode**. The command-line flag takes precedence over the environment variable if both are set.
+
+## Docker Usage
+
+The official Docker image `ghcr.io/timthesinner/smart-mcp-proxy:latest` is available and supports `amd64` and `arm64` architectures.
+
+### Default Mode (Command/STDIO)
+
+By default, the Docker container runs the proxy in **Command/STDIO mode**. This is often suitable for integrations where the container's STDIN/STDOUT is connected to another process.
+
+```bash
+# Example: Run in default Command/STDIO mode
+# Mount your config file and pass its path via environment variable
+docker run --rm -i \
+  -v /path/to/your/config.json:/app/config.json:ro \
+  -e MCP_PROXY_CONFIG=/app/config.json \
+  ghcr.io/timthesinner/smart-mcp-proxy:latest
+```
+*Note the use of `-i` (interactive) to keep STDIN open for the command mode.*
+
+### Overriding to HTTP Mode
+
+To run the container in HTTP mode, you must:
+1. Set the `MCP_PROXY_MODE` environment variable to `http`.
+2. Expose the proxy's port (default 8080) from the container.
+
+```bash
+# Example: Run in HTTP mode
+# Mount config, set mode to http, and map port 8080
+docker run --rm -d \
+  -p 8080:8080 \
+  -v /path/to/your/config.json:/app/config.json:ro \
+  -e MCP_PROXY_CONFIG=/app/config.json \
+  -e MCP_PROXY_MODE=http \
+  --name my-mcp-proxy \
+  ghcr.io/timthesinner/smart-mcp-proxy:latest
+```
+*Note the use of `-d` (detached) and `-p` (port mapping) for HTTP mode.*
+
+## VS Code Launch Configuration for Development
+
+For local development and debugging, a VS Code launch configuration is provided in `.vscode/launch.json`:
+
+- **`Launch Proxy (STDIO Mode)`:** This configuration runs the proxy directly in Command/STDIO mode using the `configs/example-config.json` file. It's useful for testing the STDIO communication channel. You can find and run this configuration from the "Run and Debug" panel in VS Code.
+
 ## Docker-in-Docker (DinD) Support and Security Considerations
 
 The smart-mcp-proxy project supports Docker-in-Docker (DinD) usage in two primary ways: by mounting the host Docker socket directly or by using a DinD sidecar container. Each approach has distinct security implications and usage scenarios.

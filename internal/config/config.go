@@ -109,6 +109,56 @@ type ToolInfo struct {
 	Annotations map[string]interface{} `json:"annotations,omitempty"`
 }
 
+// CallToolRequestParams represents the parameters for a 'tools/call' JSON-RPC request.
+type CallToolRequestParams struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// ToolError represents an error returned by a tool execution.
+type ToolError struct {
+	Message string      `json:"message"`
+	Code    string      `json:"code,omitempty"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+// ImageSource represents the source data for an image content block.
+type ImageSource struct {
+	Type      string `json:"type"`      // e.g., "base64"
+	MediaType string `json:"mediaType"` // e.g., "image/png"
+	Data      string `json:"data"`
+}
+
+// ContentBlock represents a single block of content within a CallToolResult.
+// It uses omitempty and pointers to handle the union nature of different block types.
+type ContentBlock struct {
+	Type string `json:"type"` // "text", "image", "tool_use", "tool_result"
+
+	// Fields for type="text"
+	Text *string `json:"text,omitempty"`
+
+	// Fields for type="image"
+	Source *ImageSource `json:"source,omitempty"`
+
+	// Fields for type="tool_use"
+	ToolUseID *string                `json:"toolUseId,omitempty"`
+	ToolName  *string                `json:"name,omitempty"` // Note: reusing 'name' tag
+	Input     map[string]interface{} `json:"input,omitempty"`
+
+	// Fields for type="tool_result"
+	// ToolUseID is also used here (defined above)
+	Content *string    `json:"content,omitempty"` // Assuming string content for now
+	IsError *bool      `json:"isError,omitempty"`
+	Error   *ToolError `json:"error,omitempty"` // Renamed from ToolResultError for consistency
+}
+
+// CallToolResult represents the result object for a 'tools/call' JSON-RPC response.
+type CallToolResult struct {
+	Content   []ContentBlock `json:"content"`
+	IsError   bool           `json:"isError"`             // Overall error status for the tool call itself
+	ToolError *ToolError     `json:"toolError,omitempty"` // Error details if the call itself failed (distinct from tool_result block errors)
+}
+
 // GetTools returns a copy of the current list of tools exposed by the MCP server.
 func (s *MCPServer) GetTools() []ToolInfo {
 	s.mu.Lock()
