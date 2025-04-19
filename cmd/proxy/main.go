@@ -13,9 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"smart-mcp-proxy/internal/config"
@@ -419,39 +417,6 @@ func main() {
 	if err := proxy.Run(); err != nil {
 		log.Fatalf("proxy run error: %v", err)
 	}
-}
-
-func runHTTPMode(cfg *config.Config) {
-	ps, err := NewProxyServer(cfg)
-	if err != nil {
-		log.Fatalf("failed to create proxy server: %v", err)
-	}
-
-	srv := &http.Server{
-		Addr:         ":8080",
-		Handler:      ps.engine,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
-	}
-
-	log.Println("Starting MCP Proxy Server on :8080")
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
-		}
-	}()
-
-	<-done
-	log.Println("\nShutting down MCP Proxy Server...")
-
-	srv.Shutdown(context.Background())
-	ps.Shutdown()
-
-	log.Println("MCP Proxy Server has been shut down gracefully")
 }
 
 func runCommandMode(cfg *config.Config) {

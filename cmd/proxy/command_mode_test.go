@@ -10,7 +10,7 @@ import (
 	"smart-mcp-proxy/internal/config"
 )
 
-func setupTestCommandProxyServer() (*ProxyServer, *config.Config, []*httptest.Server) {
+func setupTestCommandProxyServer() (*config.Config, []*httptest.Server) {
 	server1, server1Conf := testHttpServer("server1", []string{"tool1", "tool2"}, []string{"res1"})
 	server2, server2Conf := testHttpServer("server2", []string{"tool3"}, []string{"res2"})
 
@@ -18,50 +18,11 @@ func setupTestCommandProxyServer() (*ProxyServer, *config.Config, []*httptest.Se
 		MCPServers: []config.MCPServerConfig{server1Conf, server2Conf},
 	}
 
-	ps, err := NewProxyServer(cfg)
-	if err != nil {
-		panic((err))
-	}
-	return ps, cfg, []*httptest.Server{server1, server2}
-}
-
-func TestHandleCommandRequest(t *testing.T) {
-	ps, _, servers := setupTestCommandProxyServer()
-	for _, server := range servers {
-		defer server.Close()
-	}
-
-	mcpReq := map[string]interface{}{
-		"method":  "GET",
-		"path":    "/tools",
-		"query":   "",
-		"headers": map[string][]string{},
-		"body":    "",
-	}
-
-	reqBytes, err := json.Marshal(mcpReq)
-	if err != nil {
-		t.Fatalf("failed to marshal MCP request: %v", err)
-	}
-
-	respBytes, err := handleCommandRequest(ps, reqBytes)
-	if err != nil {
-		t.Fatalf("handleCommandRequest returned error: %v", err)
-	}
-
-	var resp map[string]interface{}
-	err = json.Unmarshal(respBytes, &resp)
-	if err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
-
-	if _, ok := resp["tools"]; !ok {
-		t.Errorf("response missing 'tools' key")
-	}
+	return cfg, []*httptest.Server{server1, server2}
 }
 
 func TestRunCommandMode(t *testing.T) {
-	_, cfg, servers := setupTestCommandProxyServer()
+	cfg, servers := setupTestCommandProxyServer()
 	for _, server := range servers {
 		defer server.Close()
 	}
@@ -104,7 +65,7 @@ func TestRunCommandMode(t *testing.T) {
 	}
 
 	if _, ok := resp["tools"]; !ok {
-		t.Errorf("response missing 'tools' key")
+		t.Errorf("response missing 'tools' key %s", respData)
 	}
 }
 
