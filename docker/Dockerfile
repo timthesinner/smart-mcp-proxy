@@ -2,7 +2,7 @@
 # Multi-stage build for smart-mcp-proxy supporting amd64 and arm64
 
 # Builder stage
-FROM --platform=$BUILDPLATFORM golang:1.21-bullseye AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24.2-bullseye AS builder
 
 # Set working directory inside builder
 WORKDIR /src
