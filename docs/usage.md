@@ -38,6 +38,33 @@ export MCP_PROXY_CONFIG=/path/to/config.json
 
 See the example configuration file at `configs/example-config.json` for a sample setup, including examples of both HTTP-based and stdio-based MCP server configurations.
 
+
+## Using Docker-in-Docker (DinD) Sidecar for CI or Isolation
+
+For CI/CD pipelines or scenarios where mounting the host Docker socket is not possible or desirable, you can run the MCP Proxy Server alongside a Docker-in-Docker (DinD) sidecar service.
+
+This approach provides full Docker daemon isolation by running a separate Docker daemon inside a privileged container. The MCP Proxy Server is configured to communicate with this DinD daemon over TCP.
+
+### Example Setup
+
+An example Docker Compose file `docker-compose-dind-example.yml` is provided in the project root. It includes:
+
+- A `dind` service using the `docker:dind` image, running in privileged mode with TLS disabled.
+- The `smart-mcp-proxy` service configured with the environment variable `DOCKER_HOST=tcp://dind:2375` to connect to the DinD daemon.
+- A named volume `dind-storage` for Docker daemon storage.
+
+### When to Use
+
+- In CI/CD pipelines where the host Docker socket cannot be mounted.
+- When full isolation of the Docker daemon is required.
+- For advanced scenarios requiring a separate Docker daemon lifecycle.
+
+To use this setup, run:
+
+```bash
+docker-compose -f docker-compose-dind-example.yml up
+```
+
 ## Using stdio-based MCP Servers
 
 For MCP servers configured with the `command` field (stdio-based), the proxy server will start the specified command as a local process. You can optionally specify command-line arguments using the `args` field and environment variables using the `env` field in the configuration.
