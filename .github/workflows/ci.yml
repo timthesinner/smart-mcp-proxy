@@ -2,8 +2,8 @@ name: ci
 
 on:
   push:
-    branches:
-      - '**'
+    branches-ignore:
+      - main
 
 jobs:
   fmt-and-test:
