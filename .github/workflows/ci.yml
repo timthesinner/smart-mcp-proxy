@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  fmt-and-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.2'
+
+      - name: Run go fmt check
+        run: |
+          if ! go fmt ./... | tee /dev/stderr | grep -q '^'; then
+            echo "Code is properly formatted"
+          else
+            echo "Code is not properly formatted. Please run 'go fmt ./...' to format your code."
+            exit 1
+          fi
+
+      - name: Run go tests
+        run: go test ./...
