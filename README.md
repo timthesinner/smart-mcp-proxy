@@ -10,6 +10,7 @@ Smart MCP Proxy is a powerful, secure, and configurable gateway that centralizes
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [CI/CD Pipeline](#cicd-pipeline)
 - [Documentation](#documentation)
 - [License](#license)
 
@@ -77,6 +78,44 @@ export MCP_PROXY_CONFIG=/path/to/config.json
 For stdio-based MCP servers, the proxy manages the lifecycle of the server process, including starting and stopping it as needed.
 
 See detailed usage instructions in [docs/usage.md](docs/usage.md).
+
+## CI/CD Pipeline
+
+The Smart MCP Proxy project includes a robust CI/CD pipeline to ensure code quality and streamline deployment:
+
+- **Pre-commit Checks:** Before committing code, the pipeline runs `go fmt` to enforce Go code formatting standards and `go test` to execute all tests, ensuring code correctness and consistency.
+- **Multi-Architecture Docker Build:** The pipeline builds Docker images for both `amd64` and `arm64` architectures, enabling broad compatibility across different hardware platforms.
+- **Docker Image Push:** Built images are pushed to the GitHub Container Registry, making them available for deployment and use.
+- **Required Secrets:** To push Docker images, the pipeline requires GitHub secrets such as `CR_PAT` (Container Registry Personal Access Token) for authentication.
+
+### Running Pre-commit Checks Locally
+
+To run the pre-commit checks on your local machine, execute:
+
+```bash
+go fmt ./...
+go test ./...
+```
+
+Ensure your code is properly formatted and all tests pass before committing.
+
+### Pulling and Running the Docker Image
+
+You can pull the latest multi-architecture Docker image from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/timthesinner/smart-mcp-proxy:latest
+```
+
+Run the Docker container with:
+
+```bash
+docker run -p 8080:8080 ghcr.io/timthesinner/smart-mcp-proxy:latest
+```
+
+This will start the Smart MCP Proxy server, listening on port 8080.
+
+Supported architectures for the Docker image are `amd64` and `arm64`.
 
 ## Documentation
 
