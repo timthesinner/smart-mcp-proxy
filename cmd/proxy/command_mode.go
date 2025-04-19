@@ -15,6 +15,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// rpcError represents a JSON-RPC 2.0 error object
+type rpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// Define JSON-RPC 2.0 request and response structs
+type jsonRPCRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      interface{}     `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type jsonRPCResponse struct {
+	JSONRPC string      `json:"jsonrpc"`
+	ID      interface{} `json:"id"`
+	Result  interface{} `json:"result,omitempty"`
+	Error   *rpcError   `json:"error,omitempty"`
+}
+
+type toolCall struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
 // CommandProxy implements the Proxy interface for STDIO transport
 type CommandProxy struct {
 	ps *ProxyServer
@@ -70,35 +96,134 @@ func (c *CommandProxy) Shutdown(ctx context.Context) error {
 
 // handleCommandRequest processes a single MCP request in command mode
 func handleCommandRequest(ps *ProxyServer, reqBytes []byte) ([]byte, error) {
-	// For simplicity, assume the request is a JSON object with method, path, headers, body
-	// We will simulate an HTTP request and get the response
-
-	// Create a dummy HTTP request from reqBytes
-	var mcpRequest struct {
-		Method  string              `json:"method"`
-		Path    string              `json:"path"`
-		Query   string              `json:"query"`
-		Headers map[string][]string `json:"headers"`
-		Body    string              `json:"body"`
-	}
-	err := json.Unmarshal(reqBytes, &mcpRequest)
-	if err != nil {
-		return nil, fmt.Errorf("invalid request JSON: %w", err)
-	}
-
-	// Build HTTP request
-	urlStr := mcpRequest.Path
-	if mcpRequest.Query != "" {
-		urlStr += "?" + mcpRequest.Query
-	}
-	req, err := http.NewRequest(mcpRequest.Method, urlStr, strings.NewReader(mcpRequest.Body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	for k, vv := range mcpRequest.Headers {
-		for _, v := range vv {
-			req.Header.Add(k, v)
+	// Parse JSON-RPC request
+	var rpcReq jsonRPCRequest
+	if err := json.Unmarshal(reqBytes, &rpcReq); err != nil {
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      nil,
+			Error: &rpcError{
+				Code:    -32700,
+				Message: "Parse error: invalid JSON",
+			},
 		}
+		return json.Marshal(resp)
+	}
+
+	// Validate JSON-RPC version
+	if rpcReq.JSONRPC != "2.0" {
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      rpcReq.ID,
+			Error: &rpcError{
+				Code:    -32600,
+				Message: "Invalid Request: jsonrpc must be '2.0'",
+			},
+		}
+		return json.Marshal(resp)
+	}
+
+	// Map JSON-RPC method to HTTP method and path
+	var httpMethod, httpPath string
+	var httpBody string
+	switch rpcReq.Method {
+	case "tools/list":
+		httpMethod = http.MethodGet
+		httpPath = "/tools"
+	case "tools/call":
+		// params must include Name and proxyPath
+		var tool toolCall
+		if err := json.Unmarshal(rpcReq.Params, &tool); err != nil {
+			resp := jsonRPCResponse{
+				JSONRPC: "2.0",
+				ID:      rpcReq.ID,
+				Error: &rpcError{
+					Code:    -32602,
+					Message: "Invalid params: " + err.Error(),
+				},
+			}
+			return json.Marshal(resp)
+		}
+		if tool.Name == "" {
+			resp := jsonRPCResponse{
+				JSONRPC: "2.0",
+				ID:      rpcReq.ID,
+				Error: &rpcError{
+					Code:    -32602,
+					Message: "Invalid params: Name is required",
+				},
+			}
+			return json.Marshal(resp)
+		}
+		httpMethod = http.MethodPost
+		// Compose path with Name
+		httpPath = "/tool/" + tool.Name
+		httpBody = string(tool.Arguments)
+	case "resources/list":
+		httpMethod = http.MethodGet
+		httpPath = "/resources"
+	case "resources/call":
+		// params must include resourceName and proxyPath
+		var params struct {
+			ResourceName string          `json:"resourceName"`
+			ProxyPath    string          `json:"proxyPath"`
+			Body         json.RawMessage `json:"body,omitempty"`
+		}
+		if err := json.Unmarshal(rpcReq.Params, &params); err != nil {
+			resp := jsonRPCResponse{
+				JSONRPC: "2.0",
+				ID:      rpcReq.ID,
+				Error: &rpcError{
+					Code:    -32602,
+					Message: "Invalid params: " + err.Error(),
+				},
+			}
+			return json.Marshal(resp)
+		}
+		if params.ResourceName == "" {
+			resp := jsonRPCResponse{
+				JSONRPC: "2.0",
+				ID:      rpcReq.ID,
+				Error: &rpcError{
+					Code:    -32602,
+					Message: "Invalid params: resourceName is required",
+				},
+			}
+			return json.Marshal(resp)
+		}
+		httpMethod = http.MethodPost
+		httpPath = "/resource/" + params.ResourceName
+		if params.ProxyPath != "" {
+			if !strings.HasPrefix(params.ProxyPath, "/") {
+				httpPath += "/"
+			}
+			httpPath += params.ProxyPath
+		}
+		httpBody = string(params.Body)
+	default:
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      rpcReq.ID,
+			Error: &rpcError{
+				Code:    -32601,
+				Message: "Method not found",
+			},
+		}
+		return json.Marshal(resp)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest(httpMethod, httpPath, strings.NewReader(httpBody))
+	if err != nil {
+		resp := jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      rpcReq.ID,
+			Error: &rpcError{
+				Code:    -32603,
+				Message: "Internal error: failed to create HTTP request",
+			},
+		}
+		return json.Marshal(resp)
 	}
 
 	// Create a ResponseRecorder to capture the response
@@ -110,13 +235,19 @@ func handleCommandRequest(ps *ProxyServer, reqBytes []byte) ([]byte, error) {
 	// Serve the request using the Gin engine
 	ps.engine.ServeHTTP(recorder, req)
 
-	// Build MCP response JSON
-	mcpResponse := map[string]interface{}{
+	// Build JSON-RPC response result
+	result := map[string]interface{}{
 		"status":  recorder.status,
 		"headers": recorder.header,
 		"body":    recorder.body.String(),
 	}
-	respBytes, err := json.Marshal(mcpResponse)
+
+	resp := jsonRPCResponse{
+		JSONRPC: "2.0",
+		ID:      rpcReq.ID,
+		Result:  result,
+	}
+	respBytes, err := json.Marshal(resp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal response: %w", err)
 	}
