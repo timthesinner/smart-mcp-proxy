@@ -272,12 +272,15 @@ func TestHTTPHandleToolCall(t *testing.T) {
 	w = httptest.NewRecorder()
 	httpProxy.engine.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code) // Or potentially 404 depending on error mapping
+	assert.Equal(t, http.StatusNotFound, w.Code) // Expect 404 for tool not found
 	var errResp map[string]interface{}
 	err = json.Unmarshal(w.Body.Bytes(), &errResp)
 	assert.NoError(t, err)
-	assert.Contains(t, errResp["error"], "Failed to execute tool 'nonexistentTool'")
-	assert.Contains(t, errResp["details"], "no MCP server found that provides tool 'nonexistentTool'")
+	// Check the specific error message returned by the updated handler
+	expectedErrMsg := "Tool 'nonexistentTool' not found or not provided by any configured server"
+	assert.Equal(t, expectedErrMsg, errResp["error"])
+	_, detailsExist := errResp["details"]
+	assert.False(t, detailsExist, "Error response should not contain 'details' field")
 
 	// --- Test invalid JSON body ---
 	args = `{"arg1": "value1"` // Malformed JSON

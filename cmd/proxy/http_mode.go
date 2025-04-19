@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors" // Add errors package
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	// "strings" // Removed as it's no longer used
 	"sync" // Import sync package
 	"syscall"
 	"time"
@@ -168,26 +170,38 @@ func (h *HTTPProxy) handleToolCall(c *gin.Context) {
 	// Call the centralized CallTool method
 	callResult, err := h.ps.CallTool(toolName, arguments)
 	if err != nil {
-		// Map the error from CallTool to an appropriate HTTP status code
 		log.Printf("Error calling tool '%s' via ProxyServer: %v", toolName, err)
-		// Basic error mapping (can be refined)
-		statusCode := http.StatusInternalServerError // Default to 500
-		errMsg := fmt.Sprintf("Failed to execute tool '%s'", toolName)
-		// Example: Check for specific error types if CallTool provides them
-		// if errors.Is(err, someNotFoundError) {
-		// 	statusCode = http.StatusNotFound
-		// 	errMsg = err.Error()
-		// } else if errors.Is(err, someForbiddenError) {
-		//  statusCode = http.StatusForbidden
-		//  errMsg = err.Error()
-		// }
 
-		// For now, return 500 with the error message
-		c.JSON(statusCode, gin.H{"error": errMsg, "details": err.Error()})
+		statusCode := http.StatusInternalServerError // Default to 500
+		errMsg := "An unexpected error occurred"     // Default generic message
+
+		// Use errors.Is for robust error checking
+		if errors.Is(err, ErrToolNotFound) {
+			statusCode = http.StatusNotFound
+			// Use the specific message from the wrapped error if desired, or a standard one
+			errMsg = fmt.Sprintf("Tool '%s' not found or not provided by any configured server", toolName)
+			// Alternatively, use err.Error() if the wrapped message is sufficient: errMsg = err.Error()
+		} else if errors.Is(err, ErrBackendCommunication) {
+			statusCode = http.StatusBadGateway
+			errMsg = fmt.Sprintf("Error communicating with backend server for tool '%s'", toolName)
+			// Log the underlying error for debugging, but don't expose details to the client
+			log.Printf("Backend communication error details for tool '%s': %v", toolName, err)
+		} else if errors.Is(err, ErrInternalProxy) {
+			statusCode = http.StatusInternalServerError
+			errMsg = fmt.Sprintf("Internal server error processing tool '%s'", toolName)
+			// Log the underlying error for debugging
+			log.Printf("Internal proxy error details for tool '%s': %v", toolName, err)
+		} else {
+			// For truly unexpected errors, log the full error but return the generic message
+			log.Printf("Unexpected error calling tool '%s': %v", toolName, err)
+		}
+
+		// Return consistent JSON error structure
+		c.JSON(statusCode, gin.H{"error": errMsg})
 		return
 	}
 
-	// Success: Return the CallToolResult
+	// Success: Return the CallToolResult directly (it's already a struct)
 	c.JSON(http.StatusOK, callResult)
 }
 

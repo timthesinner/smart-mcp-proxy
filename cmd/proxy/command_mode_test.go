@@ -214,7 +214,10 @@ func TestCommandHandleToolCall(t *testing.T) {
 		require.NotNil(t, rpcResp.Error.Data, "Error data should not be nil for tool not found")
 		errorDataStr, ok := rpcResp.Error.Data.(string)
 		require.True(t, ok, "Error data should be a string")
-		assert.Contains(t, errorDataStr, "no MCP server found that provides tool 'nonexistentTool'")
+		// Check that the underlying error data contains the ErrToolNotFound message
+		// The exact format might be "tool not found or not provided by any configured server: nonexistentTool"
+		assert.Contains(t, errorDataStr, ErrToolNotFound.Error())
+		assert.Contains(t, errorDataStr, "nonexistentTool") // Ensure the specific tool name is still present
 	}
 
 	// --- Test invalid params (missing name) ---
