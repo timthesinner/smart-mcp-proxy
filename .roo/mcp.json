@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "test-server": {
+      "url": "https://127.0.0.1:9090",
+      "disabled": false
+    }
+  }
+}
