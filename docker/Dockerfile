@@ -23,6 +23,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # Final stage
 FROM --platform=$TARGETPLATFORM debian:bookworm-slim
 
+LABEL org.opencontainers.image.source=https://github.com/timthesinner/smart-mcp-proxy
+LABEL org.opencontainers.image.description="Smart MCP Proxy Image"
+LABEL org.opencontainers.image.licenses=MIT
+
 # Set environment variables for non-interactive installs
 ENV DEBIAN_FRONTEND=noninteractive
 
