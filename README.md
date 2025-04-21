@@ -1,5 +1,5 @@
 # Smart MCP Proxy
-<p align="center">
+<p align="left">
   <img src="docs/icon.png" alt="Smart MCP Proxy Logo" width="150"/>
 </p>
 
