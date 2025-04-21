@@ -1,4 +1,8 @@
 # Smart MCP Proxy
+<p align="center">
+  <img src="docs/icon.png" alt="Smart MCP Proxy Logo" width="150"/>
+</p>
+
 
 Smart MCP Proxy is a powerful, secure, and configurable gateway that centralizes access to multiple Model Context Protocol (MCP) servers. It enables organizations to manage tokens centrally, unify MCP server configurations, and expose only the tools and resources they choose — all through a single, transparent HTTP interface with detailed logging.
 
